@@ -4,9 +4,10 @@
 
 All implementation phases and the bug hunt are complete on
 `feature/v0.1.0-portable-folder-icons`. Setup and the repaired classic cascade
-passed manual testing. The remaining Step 7 delayed Explorer repaint defect is
-repaired and verified automatically; waiting for the user to retest Apply,
-Apply Different Icon, and Reset before continuing acceptance or considering a
+passed manual testing. The first targeted-refresh repair failed manual testing
+because Explorer remained one or two customization states behind. A second,
+identity-preserving canonical-PIDL correction is verified automatically;
+waiting for the user to retest before continuing acceptance or considering a
 merge.
 
 ---
@@ -15,7 +16,7 @@ merge.
 
 | # | Severity | File | Description | Status | Found by |
 |---|----------|------|-------------|--------|----------|
-| 1 | Critical | Explorer refresh | Apply notified only the customized folder using asynchronous `SHCNF_FLUSHNOWAIT`, then raced a direct view refresh; it did not notify changed `desktop.ini` or the parent directory. | Fixed / awaiting user Step 7 retest | User |
+| 1 | Critical | Explorer refresh | The first repair added four synchronous path notifications but atomically replaced existing `desktop.ini`, changing its NTFS identity while reporting an update. Explorer could retain the preceding cached shell-item state. Existing files are now updated in place and existing notification targets use canonical PIDLs. | Fixed / awaiting second user Step 7 retest | User |
 | 2 | Critical | Registry integration | The parent stored `ExtendedSubCommandsKey` as a child key instead of a REG_SZ reference, so Explorer treated **Folder Icons** as a plain executable verb; setup also left ten recognized prototype `FolderColor_*` verbs in place. | Fixed / manual retest passed | User |
 | 3 | Critical | `Setup_and_Run-Portable-Folder-Icons.bat` | Passing the trailing-backslash checkout root as `"%~dp0"` caused native PowerShell argument parsing to retain a closing quote in the value sent to `GetFullPath`. | Fixed / manual retest passed | User |
 | 4 | Minor | Explorer UI | Windows may still retain an item image briefly after all supported targeted notifications; zero-latency repaint cannot be guaranteed. | Mitigated / manual QA | Codex |
@@ -25,6 +26,34 @@ merge.
 
 ## Work Log (newest first)
 
+- 2026-07-28 — Manual retesting showed reproducible state lag after the first
+  refresh repair: Apply/Reset eventually worked, but Explorer rendered the
+  preceding or second-preceding icon. A disposable
+  Blue → Red → Reset → Black → Green sequence proved that immediately after
+  every operation, `desktop.ini`, its UTF-16LE encoding, attributes, referenced
+  cached ICO, and SHA-256 all represented the latest request. The remaining
+  defect was file identity and invalidation semantics: every atomic update
+  replaced existing `desktop.ini` with a new NTFS file ID, while four
+  `SHCNF_PATHW` notifications described it as an update. Explorer could process
+  those notifications yet retain the prior cached shell item/property image.
+  Existing `desktop.ini` is now updated in place after recovery backup and
+  attribute handling, preserving identity; creation remains staged. Existing
+  desktop.ini/folder/parent targets are converted with
+  `SHParseDisplayName` and synchronously notified using `SHCNF_IDLIST`;
+  deletion necessarily notifies the former desktop.ini path, followed by the
+  same folder and parent PIDL invalidation. Every PIDL is released with
+  `CoTaskMemFree` in `finally`. The corrected sequence preserves a stable file
+  ID across Blue → Red and Black → Green and reports zero outstanding PIDLs.
+  `SHGetSetFolderCustomSettings` was not adopted because its documented
+  MAX_PATH boundary and whole-settings write model do not preserve this
+  project’s long-path and unrelated-content requirements. Tests cover open-file
+  identity preservation, canonical PIDL flags/cleanup, rapid sequences, Reset,
+  and final cache hashes. The final Windows PowerShell 5.1 gate passes 149
+  assertions and all ten ICO validations. Normal setup accepted all ten icons;
+  installed runtime hashes match the repository. An installed-runtime
+  Blue → Red → Reset → Black exercise showed current content/hash after every
+  step, zero outstanding PIDLs, and unchanged Explorer PIDs and locations.
+  Manual rendered-state retesting remains required. — Codex
 - 2026-07-28 — The repaired classic cascade passed manual acceptance, but
   applying Blue over an existing yellow customization remained visually stale
   until Explorer was reopened roughly 30 seconds later. The filesystem portion
@@ -149,6 +178,19 @@ merge.
 ---
 
 ## Session Sync Log (newest first)
+
+### 2026-07-28 — Machine: G6-PF5DSHVY — canonical PIDL refresh correction
+
+- Changed: updates preserve existing desktop.ini identity; new files retain
+  staged creation and recovery behavior.
+- Changed: existing Shell items are resolved with `SHParseDisplayName` and
+  synchronously notified using `SHCNF_IDLIST`, with deterministic PIDL cleanup.
+- Changed: tests cover open identity, rapid Apply/Reset sequences, PIDL target
+  selection, allocation cleanup, and latest cache content.
+- Changed: Changelog and Handoff record the failed first retest, evidence,
+  corrected cause, and pending visual retest.
+- Note: the temporary implementation plan remains intentionally committed;
+  do not delete or merge until manual approval.
 
 ### 2026-07-28 — Machine: G6-PF5DSHVY — targeted Explorer refresh repair
 

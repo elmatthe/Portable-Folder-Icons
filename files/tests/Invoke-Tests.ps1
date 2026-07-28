@@ -396,10 +396,22 @@ try {
         ([IO.File]::GetAttributes($specialIni) -bor [IO.FileAttributes]::NotContentIndexed)
     )
 
-    $secondRefreshApply = Invoke-PfiApply -TargetPath @($specialFolder) `
-        -IconHash $installedManifest.entries[1].hash -InstallRoot $installRoot `
-        -RefreshAction $refreshBoundary
+    $identityHandle = [IO.File]::Open(
+        $specialIni,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::ReadWrite
+    )
+    try {
+        $secondRefreshApply = Invoke-PfiApply -TargetPath @($specialFolder) `
+            -IconHash $installedManifest.entries[1].hash -InstallRoot $installRoot `
+            -RefreshAction $refreshBoundary
+    }
+    finally {
+        $identityHandle.Dispose()
+    }
     Assert-Equal 'Update' $refreshOrder[1] 'different-icon apply refreshes an existing customization'
+    Assert-Equal $true $secondRefreshApply.Applied 'existing desktop.ini is updated without replacing its open file identity'
     Assert-True (([IO.File]::ReadAllText((Join-Path $specialFolder 'desktop.ini'))).Contains(
         ([string]$installedManifest.entries[1].hash + '.ico,0')
     )) 'different-icon apply commits the new cached icon before refresh'
@@ -407,11 +419,12 @@ try {
 
     $notificationLog = New-Object System.Collections.Generic.List[object]
     $notificationBoundary = {
-        param($EventId, $Flags, $Path)
+        param($EventId, $Flags, $Path, $TargetKind)
         $notificationLog.Add([pscustomobject]@{
             EventId = [long]$EventId
             Flags = [uint32]$Flags
             Path = [string]$Path
+            TargetKind = [string]$TargetKind
         })
     }
     $matchingWindow = New-TestExplorerWindow ((New-Object Uri(
@@ -426,13 +439,16 @@ try {
         -ExplorerWindowsProvider $windowBoundary
     Assert-Equal 4 $refreshResult.NotificationsIssued 'refresh issues desktop.ini, folder, and parent notifications'
     Assert-Equal '8192,2048,8192,4096' (($notificationLog.EventId) -join ',') 'refresh uses update-item, attributes, update-item, and updated-dir events'
-    Assert-Equal 4101 $refreshResult.NotificationFlags 'refresh uses Unicode paths with synchronous flush'
+    Assert-Equal 'Pidl,Pidl,Pidl,Pidl' (($notificationLog.TargetKind) -join ',') 'existing refresh targets use canonical PIDLs'
+    Assert-Equal '4096,4096,4096,4096' (($notificationLog.Flags) -join ',') 'PIDL notifications use synchronous flush'
     Assert-Equal ([IO.Path]::GetFullPath((Join-Path $specialFolder 'desktop.ini'))) $notificationLog[0].Path 'refresh targets desktop.ini'
     Assert-Equal ([IO.Path]::GetFullPath($specialFolder).TrimEnd('\')) $notificationLog[1].Path 'refresh targets customized folder attributes'
     Assert-Equal ([IO.Path]::GetFullPath((Split-Path -Parent $specialFolder)).TrimEnd('\')) $notificationLog[3].Path 'refresh targets parent directory'
     Assert-Equal $true $matchingWindow.Refreshed 'Explorer view displaying parent is refreshed'
     Assert-Equal $false $otherWindow.Refreshed 'Explorer view displaying customized folder is not refreshed'
     Assert-Equal 1 $refreshResult.MatchedExplorerWindows 'only the parent Explorer view is selected'
+    [PortableFolderIcons.NativeMethods]::ValidatePidl($specialFolder)
+    Assert-Equal 0 ([PortableFolderIcons.NativeMethods]::OutstandingPidls) 'canonical PIDL allocation is released'
 
     $failedRefreshBoundary = {
         param($ChangedFolder, $DesktopIniChange)
@@ -456,6 +472,30 @@ try {
     }
     [void](Invoke-PfiReset -TargetPath @($specialFolder) -RefreshAction $resetRefreshBoundary)
     Assert-Equal 'Delete' $resetRefreshChanges[0] 'reset uses equivalent deleted-desktop.ini refresh handling'
+    $notificationLog.Clear()
+    [void](Send-PfiExplorerRefresh -FolderPath $specialFolder -DesktopIniChange Delete `
+        -NotificationAction $notificationBoundary -ExplorerWindowsProvider { @() })
+    Assert-Equal 'Path,Pidl,Pidl,Pidl' (($notificationLog.TargetKind) -join ',') 'deleted desktop.ini uses its former path while existing folder items use PIDLs'
+    Assert-Equal 4101 $notificationLog[0].Flags 'deleted desktop.ini path notification uses Unicode synchronous flush'
+
+    $postResetApply = Invoke-PfiApply -TargetPath @($specialFolder) `
+        -IconHash $installedManifest.entries[3].hash -InstallRoot $installRoot `
+        -RefreshAction $refreshBoundary
+    Assert-True (([IO.File]::ReadAllText($specialIni)).Contains(
+        ([string]$installedManifest.entries[3].hash + '.ico,0')
+    )) 'Apply A then Reset then Apply B stores B as current state'
+    $rapidFinalApply = Invoke-PfiApply -TargetPath @($specialFolder) `
+        -IconHash $installedManifest.entries[4].hash -InstallRoot $installRoot `
+        -RefreshAction $refreshBoundary
+    Assert-True (([IO.File]::ReadAllText($specialIni)).Contains(
+        ([string]$installedManifest.entries[4].hash + '.ico,0')
+    )) 'multiple rapid colors leave the final requested icon current'
+    $finalExpectedHash = [string]$installedManifest.entries[4].hash
+    $finalCachedPath = Join-Path (Join-Path $installRoot 'icons') `
+        $installedManifest.entries[4].cachedFilename
+    Assert-Equal $finalExpectedHash (Get-PfiSha256 $finalCachedPath) `
+        'final rapid color references cache content with the requested hash'
+    Assert-Equal $true ($postResetApply.Applied -and $rapidFinalApply.Applied) 'post-reset and rapid sequential applies complete'
 
     $dispatcherText = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\Windows\Invoke-PortableFolderIcons.ps1') -Raw
     Assert-True ($dispatcherText.IndexOf('$actionResult = Invoke-PfiApply') -lt

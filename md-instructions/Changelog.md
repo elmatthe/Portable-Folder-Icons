@@ -33,6 +33,12 @@
 
 ### Fixed
 
+- Prevented reproducible one-state-behind Explorer rendering by preserving the
+  identity of an existing desktop.ini during updates and replacing path-only
+  invalidation for existing Shell items with synchronous canonical-PIDL
+  notifications obtained through `SHParseDisplayName`. Deleted desktop.ini
+  paths retain the supported path notification, and all allocated PIDLs are
+  released deterministically.
 - Strengthened Apply and Reset repaint handling by synchronously notifying the
   Shell about desktop.ini creation/update/deletion, folder attributes and item
   changes, and parent-directory changes before refreshing only Explorer views

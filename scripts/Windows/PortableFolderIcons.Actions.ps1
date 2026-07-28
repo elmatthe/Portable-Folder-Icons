@@ -84,8 +84,15 @@ function Write-PfiDesktopIniSafely {
             return [pscustomobject]@{ Path = $iniPath; Deleted = $existing }
         }
         $encoding = New-Object Text.UnicodeEncoding($false, $true)
-        [IO.File]::WriteAllText($temporaryPath, $Content, $encoding)
-        Move-Item -LiteralPath $temporaryPath -Destination $iniPath -Force
+        if ($existing) {
+            # Preserve the existing file identity so Shell caches and UPDATEITEM
+            # notifications refer to the same item before and after the write.
+            [IO.File]::WriteAllText($iniPath, $Content, $encoding)
+        }
+        else {
+            [IO.File]::WriteAllText($temporaryPath, $Content, $encoding)
+            Move-Item -LiteralPath $temporaryPath -Destination $iniPath
+        }
         $baseAttributes = if ($null -ne $originalAttributes) {
             $originalAttributes
         }
@@ -135,28 +142,90 @@ function Send-PfiExplorerRefresh {
     $folder = [IO.Path]::GetFullPath($FolderPath).TrimEnd('\')
     $desktopIni = Join-Path $folder 'desktop.ini'
     $parent = [IO.Path]::GetFullPath((Split-Path -Parent $folder)).TrimEnd('\')
-    if ($null -eq $NotificationAction) {
-        if (-not ('PortableFolderIcons.NativeMethods' -as [type])) {
-            Add-Type -TypeDefinition @'
+    if (-not ('PortableFolderIcons.NativeMethods' -as [type])) {
+        Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 namespace PortableFolderIcons {
     public static class NativeMethods {
-        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-        public static extern void SHChangeNotify(
+        [DllImport("shell32.dll", EntryPoint = "SHChangeNotify",
+            CharSet = CharSet.Unicode, ExactSpelling = true)]
+        private static extern void SHChangeNotifyPath(
             long eventId, uint flags, string item1, IntPtr item2);
+
+        [DllImport("shell32.dll", EntryPoint = "SHChangeNotify",
+            ExactSpelling = true)]
+        private static extern void SHChangeNotifyPidl(
+            long eventId, uint flags, IntPtr item1, IntPtr item2);
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        private static extern int SHParseDisplayName(
+            string name, IntPtr bindContext, out IntPtr pidl,
+            uint attributesIn, out uint attributesOut);
+
+        public static int OutstandingPidls { get; private set; }
+
+        public static void NotifyPath(long eventId, uint flags, string path) {
+            SHChangeNotifyPath(eventId, flags, path, IntPtr.Zero);
+        }
+
+        public static void NotifyPidl(long eventId, uint flags, string path) {
+            IntPtr pidl;
+            uint attributes;
+            int result = SHParseDisplayName(
+                path, IntPtr.Zero, out pidl, 0, out attributes);
+            if (result < 0) {
+                Marshal.ThrowExceptionForHR(result);
+            }
+            OutstandingPidls++;
+            try {
+                SHChangeNotifyPidl(
+                    eventId, flags, pidl, IntPtr.Zero);
+            }
+            finally {
+                Marshal.FreeCoTaskMem(pidl);
+                OutstandingPidls--;
+            }
+        }
+
+        public static void ValidatePidl(string path) {
+            IntPtr pidl;
+            uint attributes;
+            int result = SHParseDisplayName(
+                path, IntPtr.Zero, out pidl, 0, out attributes);
+            if (result < 0) {
+                Marshal.ThrowExceptionForHR(result);
+            }
+            OutstandingPidls++;
+            try {
+                if (pidl == IntPtr.Zero) {
+                    throw new InvalidOperationException(
+                        "SHParseDisplayName returned an empty PIDL.");
+                }
+            }
+            finally {
+                Marshal.FreeCoTaskMem(pidl);
+                OutstandingPidls--;
+            }
+        }
     }
 }
 '@
-        }
+    }
+    if ($null -eq $NotificationAction) {
         $NotificationAction = {
-            param([long]$EventId, [uint32]$Flags, [string]$Path)
-            [PortableFolderIcons.NativeMethods]::SHChangeNotify(
-                $EventId,
-                $Flags,
-                $Path,
-                [IntPtr]::Zero
+            param(
+                [long]$EventId,
+                [uint32]$Flags,
+                [string]$Path,
+                [string]$TargetKind
             )
+            if ($TargetKind -eq 'Pidl') {
+                [PortableFolderIcons.NativeMethods]::NotifyPidl($EventId, $Flags, $Path)
+            }
+            else {
+                [PortableFolderIcons.NativeMethods]::NotifyPath($EventId, $Flags, $Path)
+            }
         }
     }
     if ($null -eq $ExplorerWindowsProvider) {
@@ -168,8 +237,10 @@ namespace PortableFolderIcons {
 
     $warnings = New-Object System.Collections.Generic.List[string]
     $notifications = New-Object System.Collections.Generic.List[object]
-    # SHCNF_PATHW | SHCNF_FLUSH. FLUSH waits for delivery before refreshing views.
-    [uint32]$notificationFlags = 0x00000005 -bor 0x00001000
+    # SHCNF_IDLIST/SHCNF_PATHW | SHCNF_FLUSH. Existing Shell items use
+    # canonical PIDLs; a deleted desktop.ini must use its former path.
+    [uint32]$pidlNotificationFlags = 0x00001000
+    [uint32]$pathNotificationFlags = 0x00000005 -bor 0x00001000
     if ($DesktopIniChange -ne 'None') {
         [long]$desktopIniEvent = switch ($DesktopIniChange) {
             'Create' { 0x00000002 } # SHCNE_CREATE
@@ -180,28 +251,39 @@ namespace PortableFolderIcons {
             Event = $DesktopIniChange
             EventId = $desktopIniEvent
             Path = $desktopIni
+            TargetKind = if ($DesktopIniChange -eq 'Delete') { 'Path' } else { 'Pidl' }
         })
     }
     $notifications.Add([pscustomobject]@{
         Event = 'Attributes'
         EventId = [long]0x00000800 # SHCNE_ATTRIBUTES
         Path = $folder
+        TargetKind = 'Pidl'
     })
     $notifications.Add([pscustomobject]@{
         Event = 'UpdateItem'
         EventId = [long]0x00002000 # SHCNE_UPDATEITEM
         Path = $folder
+        TargetKind = 'Pidl'
     })
     $notifications.Add([pscustomobject]@{
         Event = 'UpdateDirectory'
         EventId = [long]0x00001000 # SHCNE_UPDATEDIR
         Path = $parent
+        TargetKind = 'Pidl'
     })
 
     $issued = 0
     foreach ($notification in $notifications) {
         try {
-            & $NotificationAction $notification.EventId $notificationFlags $notification.Path
+            $flags = if ($notification.TargetKind -eq 'Pidl') {
+                $pidlNotificationFlags
+            }
+            else {
+                $pathNotificationFlags
+            }
+            & $NotificationAction $notification.EventId $flags `
+                $notification.Path $notification.TargetKind
             $issued++
         }
         catch {
@@ -241,7 +323,9 @@ namespace PortableFolderIcons {
     return [pscustomobject]@{
         NotificationsPlanned = $notifications.Count
         NotificationsIssued = $issued
-        NotificationFlags = $notificationFlags
+        Notifications = $notifications.ToArray()
+        PidlNotificationFlags = $pidlNotificationFlags
+        PathNotificationFlags = $pathNotificationFlags
         Folder = $folder
         DesktopIni = $desktopIni
         Parent = $parent
