@@ -6,6 +6,9 @@
 
 - Established the local scaffold baseline and v0.1.0 implementation branch.
 - Added ten user-supplied, redistribution-approved folder ICO assets.
+- Added pure PowerShell core functions and deterministic tests for labels, ICO
+  validation, hashing/cache plans, manifests, cleanup guards, selection
+  validation, and loss-minimizing `desktop.ini` transforms.
 
 ### Changed
 

@@ -19,6 +19,21 @@ function Add-CheckPass {
 Write-Host 'Portable Folder Icons verification'
 Write-Host ('Repository: {0}' -f $repoRoot)
 
+$testScript = Join-Path $repoRoot 'files\tests\Invoke-Tests.ps1'
+if (Test-Path -LiteralPath $testScript -PathType Leaf) {
+    & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+        -NoLogo -NoProfile -ExecutionPolicy Bypass -File $testScript
+    if ($LASTEXITCODE -eq 0) {
+        Add-CheckPass 'deterministic PowerShell tests'
+    }
+    else {
+        Add-CheckFailure ("test suite exited with code {0}" -f $LASTEXITCODE)
+    }
+}
+else {
+    Add-CheckFailure 'missing files\tests\Invoke-Tests.ps1'
+}
+
 $required = @(
     '.gitattributes',
     '.gitignore',
@@ -32,6 +47,7 @@ $required = @(
     'md-instructions\Decisions.md',
     'md-instructions\Handoff.md',
     'scripts\verify.ps1'
+    'scripts\Windows\PortableFolderIcons.Core.ps1'
 )
 foreach ($relativePath in $required) {
     if (Test-Path -LiteralPath (Join-Path $repoRoot $relativePath) -PathType Leaf) {
