@@ -5,6 +5,20 @@ entries appear first.
 
 ---
 
+## 004 — Targeted Shell refresh without Explorer restart — 2026-07-28 — Codex
+
+**Status:** Accepted
+**Context:** Folder icon changes should appear promptly without closing user
+windows, clearing the global icon cache, or restarting Explorer.
+**Decision:** Send path-scoped `SHChangeNotify` attribute/update events and
+refresh only open filesystem Explorer windows currently displaying the
+changed folder's parent.
+**Alternatives considered:** Restarting `explorer.exe` disrupts every window;
+global cache rebuilds are slow and destructive; notification alone can leave
+some windows visually stale.
+**Consequences:** Open windows and their locations remain intact, though
+Windows caching can still require navigating away and back on some systems.
+
 ## 003 — Version 1 is single-selection only — 2026-07-28 — Codex
 
 **Status:** Accepted

@@ -5,6 +5,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 . (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Core.ps1')
 . (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Integration.ps1')
+. (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Actions.ps1')
 Add-Type -AssemblyName System.Drawing
 
 $script:Passed = 0
@@ -160,6 +161,61 @@ try {
     $dryRun = @(Register-PfiContextMenu -Manifest $installedManifest -InstallRoot $installRoot `
         -RegistryRoot $registryRoot -WhatIf)
     Assert-Equal $registryPlan.Count $dryRun.Count 'dry-run registration returns the complete disposable registry plan'
+
+    $actionFolder = Join-Path $testRoot 'Action Target (ü)'
+    [void](New-Item -ItemType Directory -Path $actionFolder)
+    $actionIni = Join-Path $actionFolder 'desktop.ini'
+    [IO.File]::WriteAllText(
+        $actionIni,
+        "[.ShellClassInfo]`r`nInfoTip=Preserve this`r`n[ViewState]`r`nFolderType=Generic`r`n"
+    )
+    $actionEntry = @($installedManifest.entries | Where-Object validationState -eq 'Accepted')[0]
+    [void](Invoke-PfiApply -TargetPath @($actionFolder) -IconHash $actionEntry.hash `
+        -InstallRoot $installRoot -SkipRefresh)
+    $afterApply = [IO.File]::ReadAllText($actionIni)
+    Assert-True ($afterApply.Contains('InfoTip=Preserve this')) 'filesystem apply preserves unrelated desktop.ini key'
+    Assert-True ($afterApply.Contains('[ViewState]')) 'filesystem apply preserves unrelated desktop.ini section'
+    Assert-True (($afterApply -match 'IconResource=.*\\icons\\[a-f0-9]{64}\.ico,0')) 'filesystem apply uses stable cached hash path'
+    $iniBytes = [IO.File]::ReadAllBytes($actionIni)
+    Assert-True ($iniBytes.Length -ge 2 -and $iniBytes[0] -eq 0xFF -and $iniBytes[1] -eq 0xFE) 'filesystem apply writes UTF-16LE BOM'
+    Assert-True (([IO.File]::GetAttributes($actionIni) -band [IO.FileAttributes]::Hidden) -ne 0) 'filesystem apply sets desktop.ini Hidden'
+    Assert-True (([IO.File]::GetAttributes($actionIni) -band [IO.FileAttributes]::System) -ne 0) 'filesystem apply sets desktop.ini System'
+    Assert-True (([IO.File]::GetAttributes($actionFolder) -band [IO.FileAttributes]::ReadOnly) -ne 0) 'filesystem apply sets only required folder ReadOnly bit'
+
+    [void](Invoke-PfiReset -TargetPath @($actionFolder) -SkipRefresh)
+    $afterReset = [IO.File]::ReadAllText($actionIni)
+    Assert-True ($afterReset.Contains('InfoTip=Preserve this')) 'filesystem reset preserves unrelated desktop.ini key'
+    Assert-True ($afterReset.Contains('[ViewState]')) 'filesystem reset preserves unrelated desktop.ini section'
+    Assert-Equal $false ($afterReset.Contains('IconResource=')) 'filesystem reset removes icon customization'
+    [void](Invoke-PfiReset -TargetPath @($actionFolder) -SkipRefresh)
+    Assert-True (Test-Path -LiteralPath $actionIni) 'filesystem reset is idempotent with unrelated content'
+
+    $emptyFolder = Join-Path $testRoot 'Empty Reset'
+    [void](New-Item -ItemType Directory -Path $emptyFolder)
+    [void](Invoke-PfiApply -TargetPath @($emptyFolder) -IconHash $actionEntry.hash `
+        -InstallRoot $installRoot -SkipRefresh)
+    [void](Invoke-PfiReset -TargetPath @($emptyFolder) -SkipRefresh)
+    Assert-Equal $false (Test-Path -LiteralPath (Join-Path $emptyFolder 'desktop.ini')) 'reset deletes desktop.ini only when otherwise empty'
+
+    $malformedFolder = Join-Path $testRoot 'Malformed Existing Ini'
+    [void](New-Item -ItemType Directory -Path $malformedFolder)
+    $malformedIni = Join-Path $malformedFolder 'desktop.ini'
+    [IO.File]::WriteAllText($malformedIni, "[broken`r`nKeep=This")
+    Assert-Throws {
+        Invoke-PfiApply -TargetPath @($malformedFolder) -IconHash $actionEntry.hash `
+            -InstallRoot $installRoot -SkipRefresh
+    } 'apply rejects malformed existing desktop.ini'
+    Assert-Equal "[broken`r`nKeep=This" ([IO.File]::ReadAllText($malformedIni)) 'malformed desktop.ini remains unchanged'
+
+    $corruptCachePath = Join-Path (Join-Path $installRoot 'icons') $actionEntry.cachedFilename
+    [IO.File]::WriteAllText($corruptCachePath, 'corrupt')
+    $integrityFolder = Join-Path $testRoot 'Integrity Target'
+    [void](New-Item -ItemType Directory -Path $integrityFolder)
+    Assert-Throws {
+        Invoke-PfiApply -TargetPath @($integrityFolder) -IconHash $actionEntry.hash `
+            -InstallRoot $installRoot -SkipRefresh
+    } 'apply rejects cached ICO with wrong hash'
+    Assert-Equal $false (Test-Path -LiteralPath (Join-Path $integrityFolder 'desktop.ini')) 'hash failure leaves target unchanged'
 }
 finally {
     if (Test-Path -LiteralPath $testRoot) {

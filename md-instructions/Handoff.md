@@ -2,8 +2,8 @@
 
 ## Current Focus
 
-Phases 0–3 are complete and verified. Phase 4 Apply, Reset, and targeted Shell
-refresh is next on `feature/v0.1.0-portable-folder-icons`.
+Phases 0–4 are complete and verified. Phase 5 Repair, Uninstall,
+documentation, and hardening is next on the working branch.
 
 ---
 
@@ -17,6 +17,15 @@ refresh is next on `feature/v0.1.0-portable-folder-icons`.
 
 ## Work Log (newest first)
 
+- 2026-07-28 — Phase 4 checkpoint passed under Windows PowerShell 5.1. Added
+  protected/root/filesystem target checks, manifest/hash-resolved Apply,
+  cached-icon integrity verification, recoverable UTF-16LE `desktop.ini`
+  writes, selective icon-field Reset, narrow attribute operations,
+  `SHChangeNotify`, and refresh of only Explorer windows showing the affected
+  parent. Temp-folder tests cover unrelated-content preservation, encoding,
+  attributes, idempotence, empty-INI deletion, malformed INI recovery, and
+  corrupt cache rejection. 60 assertions pass; `git diff --check` is clean.
+  — Codex
 - 2026-07-28 — Phase 3 checkpoint passed under Windows PowerShell 5.1. Added
   the documented HKCU `ExtendedSubCommandsKey\shell` cascade, alphabetic
   hash-derived icon verbs, separator flag, Reset/Repair/Uninstall commands,
@@ -53,6 +62,12 @@ refresh is next on `feature/v0.1.0-portable-folder-icons`.
 ---
 
 ## Session Sync Log (newest first)
+
+### 2026-07-28 — Machine: G6-PF5DSHVY — pushed with Phase 4 checkpoint
+
+- Added: `scripts/Windows/PortableFolderIcons.Actions.ps1`.
+- Changed: installed dispatcher and installer runtime completeness check.
+- Changed: tests, Changelog, Decisions, and Handoff for Phase 4.
 
 ### 2026-07-28 — Machine: G6-PF5DSHVY — pushed with Phase 3 checkpoint
 

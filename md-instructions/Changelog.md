@@ -15,6 +15,10 @@
 - Added a current-user classic **Folder Icons** cascade with alphabetic
   hash-keyed icon verbs, Reset, Repair, and Uninstall commands, plus
   single-selection registration and fixed-script argument boundaries.
+- Added integrity-checked Apply and loss-minimizing Reset actions with
+  UTF-16LE `desktop.ini` writes, narrow attribute changes, recovery backups,
+  protected-target checks, Shell change notification, and parent-window-only
+  Explorer refresh.
 
 ### Changed
 

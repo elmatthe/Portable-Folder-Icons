@@ -80,7 +80,7 @@ try {
     Write-Host 'Staging and validating runtime scripts...'
 
     $runtimeSources = @(Get-ChildItem -LiteralPath $sourceScripts -Filter '*.ps1' -File | Sort-Object Name)
-    if ($runtimeSources.Count -lt 4) {
+    if ($runtimeSources.Count -lt 5) {
         throw 'The staged runtime is incomplete.'
     }
     foreach ($source in $runtimeSources) {
