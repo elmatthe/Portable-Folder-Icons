@@ -27,7 +27,7 @@ download on the first run. If you trust this copy, choose **More info** and
 then **Run anyway**. The launcher refuses to run elevated; do not choose
 **Run as administrator**.
 
-Setup validates each immediate `.ico` file in `files\ICO-FIles`, copies valid
+Setup validates each immediate `.ico` file in `files\ICO-Files`, copies valid
 content to a SHA-256-named cache, installs a self-contained runtime under
 `%LOCALAPPDATA%\Portable-Folder-Icons`, and creates the current-user menu.
 Rerunning the batch is a safe install/update/repair/rescan operation.
@@ -57,7 +57,7 @@ The submenu also includes:
 
 ## Add or update icons
 
-Place immediate `.ico` files in `files\ICO-FIles` and rerun the setup batch.
+Place immediate `.ico` files in `files\ICO-Files` and rerun the setup batch.
 Subfolders are not scanned. Labels come from filenames: `Folder_Blue.ico`
 becomes **Blue**, underscores become spaces, and other capitalization is
 preserved.

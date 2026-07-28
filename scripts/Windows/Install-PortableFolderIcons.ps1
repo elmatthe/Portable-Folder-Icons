@@ -56,7 +56,7 @@ function Write-SetupSummary {
         $discovered, $accepted, $reused, $copied, $rejected)
 }
 
-$sourceIcons = Join-Path $RepositoryRoot 'files\ICO-FIles'
+$sourceIcons = Join-Path $RepositoryRoot 'files\ICO-Files'
 $sourceScripts = Join-Path $RepositoryRoot 'scripts\Windows'
 $runtimePath = Join-Path $InstallRoot 'runtime'
 $iconsPath = Join-Path $InstallRoot 'icons'

@@ -24,7 +24,7 @@ user:
    **Folder Icons** submenu.
 5. Select any valid bundled/custom ICO listed there and see the folder icon
    update immediately or as close to immediately as Windows Explorer permits.
-6. Add more `.ico` files to the repository-relative `files\ICO-FIles` folder,
+6. Add more `.ico` files to the repository-relative `files\ICO-Files` folder,
    rerun the setup batch, and receive updated menu choices.
 7. Reset a folder to its default icon, repair the installed integration, or
    uninstall the tool.
@@ -42,9 +42,9 @@ from a moved checkout must update the stable runtime correctly.
 4. Store applied icons in a content-hashed cache under that runtime so old
    folder customizations remain stable after source files are renamed or
    replaced.
-5. Treat `files\ICO-FIles` as the exact repository-relative icon source.
+5. Treat `files\ICO-Files` as the exact repository-relative icon source.
    The user's current example location is:
-   `C:\Users\ematthew\Portable-User-Installs\Portable-Folder-Icons\files\ICO-FIles`.
+   `C:\Users\ematthew\Portable-User-Installs\Portable-Folder-Icons\files\ICO-Files`.
    Never hardcode that absolute path or username.
 6. Generate display labels automatically from filenames:
    `Folder_Blue.ico` becomes `Blue`; `Work Projects.ico` remains
@@ -63,7 +63,7 @@ from a moved checkout must update the stable runtime correctly.
 ## Project-specific structure decision
 
 `AI-WORKSPACE.md` normally defines `files/` as development-only. The user has
-explicitly selected `files\ICO-FIles` as the distributable installer-source
+explicitly selected `files\ICO-Files` as the distributable installer-source
 location for this project. Record this narrow project-specific exception in
 `md-instructions/Decisions.md`.
 
@@ -83,7 +83,7 @@ scripts/
   Windows/                            product PowerShell runtime
   verify.ps1                          one-command verification gate
 files/
-  ICO-FIles/                          redistributable installer-source ICOs
+  ICO-Files/                          redistributable installer-source ICOs
   tests/                              deterministic PowerShell tests
   test-files/                         generated or safe test fixtures
   test-logs/                          ignored manual QA logs
@@ -178,7 +178,7 @@ mandatory:
 ### 3. ICO discovery, validation, labels, and cache
 
 Scan only immediate `.ico` files from the exact repository-relative
-`files\ICO-FIles` source unless a documented reason supports recursion.
+`files\ICO-Files` source unless a documented reason supports recursion.
 
 For every candidate:
 
@@ -379,7 +379,7 @@ Update the permanent documents without mixing their roles:
 - `md-instructions/Decisions.md`: append ADRs for pure PowerShell/no Python,
   classic HKCU menu, stable LocalAppData runtime, hashed cache retention,
   targeted refresh/no Explorer restart, single-selection v1, and the narrow
-  `files\ICO-FIles` project exception.
+  `files\ICO-Files` project exception.
 - `md-instructions/Handoff.md`: phase checkpoints, tests, open issues, and
   cross-device sync log.
 - `config.toml`: accurate name, version, Windows-only status, launcher, source

@@ -50,7 +50,7 @@ try {
     Assert-Equal 'MiXeD' (ConvertTo-PfiMenuLabel 'folder-MiXeD.ICO') 'preserves capitalization'
     Assert-Throws { ConvertTo-PfiMenuLabel 'Folder_.ico' } 'rejects empty label'
 
-    $validIcon = Join-Path $repoRoot 'files\ICO-FIles\Folder_Blue.ico'
+    $validIcon = Join-Path $repoRoot 'files\ICO-Files\Folder_Blue.ico'
     $validResult = Test-PfiIcoFile $validIcon
     Assert-True $validResult.IsValid 'accepts valid ICO through .NET'
     Assert-Equal 64 $validResult.Hash.Length 'returns full SHA-256'

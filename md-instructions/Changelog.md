@@ -33,6 +33,9 @@
 
 ### Fixed
 
+- Corrected the distributable icon-source directory spelling from
+  `files\ICO-FIles` to `files\ICO-Files` across Git, runtime code, tests,
+  configuration, and documentation.
 - Prevented batch metacharacters in checkout paths from being reinterpreted
   through dynamic `echo` output.
 - Removed now-empty `.ShellClassInfo` sections correctly when another INI

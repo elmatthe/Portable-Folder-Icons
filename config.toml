@@ -13,7 +13,7 @@ scripts = "scripts"
 files = "files"
 tests = "files/tests"
 test_logs = "files/test-logs"
-source_icons = "files/ICO-FIles"
+source_icons = "files/ICO-Files"
 installed_root = "%LOCALAPPDATA%/Portable-Folder-Icons"
 
 [platform]

@@ -19,6 +19,11 @@ acceptance tests and explicit merge approval.
 
 ## Work Log (newest first)
 
+- 2026-07-28 — Recorded the user-corrected case-only icon directory rename as
+  `files/ICO-Files` in Git and updated runtime code, tests, config, permanent
+  docs, and the retained plan. Full Windows PowerShell 5.1 verification passes
+  with 73 assertions, ten ICO validations, and an exact-case directory gate.
+  — Codex
 - 2026-07-28 — Phase 6 systematic bug hunt completed across every shipped
   batch/PowerShell script. Fixed unsafe batch dynamic-path echoing, adjacent
   empty INI-section cleanup, duplicate shell-section ambiguity, cache-conflict
@@ -79,6 +84,13 @@ acceptance tests and explicit merge approval.
 ---
 
 ## Session Sync Log (newest first)
+
+### 2026-07-28 — Machine: G6-PF5DSHVY — pushed with folder-name correction
+
+- Renamed: `files/ICO-FIles` to `files/ICO-Files` as a Git-recorded case-only
+  directory change (all ten ICOs preserved).
+- Changed: runtime installer, tests, verification, config, README, permanent
+  docs, and retained implementation plan to use the corrected spelling.
 
 ### 2026-07-28 — Machine: G6-PF5DSHVY — pushed with Phase 6 checkpoint
 

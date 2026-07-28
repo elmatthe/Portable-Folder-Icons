@@ -88,7 +88,17 @@ else {
 }
 
 Add-Type -AssemblyName System.Drawing
-$iconFiles = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'files\ICO-FIles') -Filter '*.ico' -File)
+$iconDirectory = Get-ChildItem -LiteralPath (Join-Path $repoRoot 'files') -Directory |
+    Where-Object { $_.Name -ceq 'ICO-Files' } |
+    Select-Object -First 1
+if ($null -eq $iconDirectory) {
+    Add-CheckFailure 'icon source directory must use exact spelling files\ICO-Files'
+    $iconFiles = @()
+}
+else {
+    Add-CheckPass 'exact icon source directory spelling: files\ICO-Files'
+    $iconFiles = @(Get-ChildItem -LiteralPath $iconDirectory.FullName -Filter '*.ico' -File)
+}
 foreach ($iconFile in $iconFiles) {
     $stream = $null
     $icon = $null

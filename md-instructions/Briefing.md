@@ -18,7 +18,7 @@ runtime and import valid ICO files from the repository.
 
 The root batch launcher invokes the repository installer beneath
 `scripts/Windows`. Setup validates immediate ICO files from
-`files/ICO-FIles`, copies accepted content into a SHA-256-named cache beneath
+`files/ICO-Files`, copies accepted content into a SHA-256-named cache beneath
 `%LOCALAPPDATA%\Portable-Folder-Icons`, stages a self-contained runtime, writes
 a manifest, and registers a tool-owned HKCU cascading menu. Installed actions
 apply or reset only folder-icon fields in `desktop.ini`, repair the installed
@@ -41,7 +41,7 @@ icons by default.
 
 This is Windows-only, so shipped PowerShell runtime files live under
 `scripts/Windows`. As a deliberate project exception, distributable source
-icons live under `files/ICO-FIles`; the installed runtime never depends on
+icons live under `files/ICO-Files`; the installed runtime never depends on
 that repository path.
 
 ## Current Version

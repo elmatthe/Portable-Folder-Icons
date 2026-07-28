@@ -5,6 +5,18 @@ entries appear first.
 
 ---
 
+## 008 — Correct icon-source directory capitalization — 2026-07-28 — Codex
+
+**Status:** Accepted; supersedes #001 only for path capitalization
+**Context:** The finalized source directory was manually corrected from the
+typo `files\ICO-FIles` to `files\ICO-Files`.
+**Decision:** Treat `files\ICO-Files` as the exact distributable installer
+source everywhere.
+**Alternatives considered:** Relying on Windows case-insensitivity would leave
+Git archives and case-sensitive tooling with the incorrect spelling.
+**Consequences:** Runtime code, tests, configuration, documentation, and the
+retained implementation plan use the corrected path.
+
 ## 007 — Retain content-hashed icons across repair and uninstall — 2026-07-28 — Codex
 
 **Status:** Accepted
@@ -84,7 +96,7 @@ can be recreated by replacing only one exact HKCU subtree.
 
 ## 001 — Preserve source icons under files/ICO-FIles — 2026-07-28 — Codex
 
-**Status:** Accepted
+**Status:** Superseded by #008 only for path capitalization
 **Context:** The global workspace convention treats `files/` as
 development-only, while the user explicitly selected `files\ICO-FIles` as the
 distributable import source.
