@@ -2,9 +2,11 @@
 
 ## Current Focus
 
-All implementation phases and the bug hunt are complete and verified on
-`feature/v0.1.0-portable-folder-icons`. Waiting for user-run Explorer
-acceptance tests and explicit merge approval.
+All implementation phases and the bug hunt are complete on
+`feature/v0.1.0-portable-folder-icons`. The Step 1 launcher defect reported
+during manual acceptance testing is fixed and verified automatically; waiting
+for the user to rerun Step 1, complete the remaining Explorer acceptance
+tests, and explicitly approve the merge.
 
 ---
 
@@ -12,13 +14,27 @@ acceptance tests and explicit merge approval.
 
 | # | Severity | File | Description | Status | Found by |
 |---|----------|------|-------------|--------|----------|
-| 1 | Minor | Explorer UI | Windows may retain a stale folder image until navigating away/back despite targeted notification; documented and pending manual characterization. | Documented / manual QA | Codex |
-| 2 | Suggestion | Selection | Multi-folder apply needs safe multi-path transport and partial-failure UX. | Deferred beyond v0.1.0 per plan | User / Codex |
+| 1 | Critical | `Setup_and_Run-Portable-Folder-Icons.bat` | Passing the trailing-backslash checkout root as `"%~dp0"` caused native PowerShell argument parsing to retain a closing quote in the value sent to `GetFullPath`. | Fixed / awaiting user Step 1 retest | User |
+| 2 | Minor | Explorer UI | Windows may retain a stale folder image until navigating away/back despite targeted notification; documented and pending manual characterization. | Documented / manual QA | Codex |
+| 3 | Suggestion | Selection | Multi-folder apply needs safe multi-path transport and partial-failure UX. | Deferred beyond v0.1.0 per plan | User / Codex |
 
 ---
 
 ## Work Log (newest first)
 
+- 2026-07-28 — Diagnosed the manual Step 1 failure at the native
+  batch-to-PowerShell boundary. `%~dp0` ends in `\`; enclosing that value
+  directly in quotes caused the closing quote to reach PowerShell as a literal
+  U+0022. The malformed installer argument was
+  `C:\Users\ematthew\Portable-User-Installs\Portable-Folder-Icons<QUOTE>`.
+  Changed the launcher boundary to `"%~dp0."`, which preserves spaces and
+  Unicode while allowing `GetFullPath` to canonicalize the harmless final
+  component. Regression tests cover the actual checkout, spaces, Unicode, the
+  exact malformed value, and launcher argument construction. All 79 assertions
+  pass. Full setup succeeded from both the actual checkout and a temporary
+  spaces-plus-Unicode checkout; a controlled pre-install failure preserved the
+  active runtime and manifest byte-for-byte. Manual Step 1 remains failed until
+  the user reruns and accepts it. — Codex
 - 2026-07-28 — Recorded the user-corrected case-only icon directory rename as
   `files/ICO-Files` in Git and updated runtime code, tests, config, permanent
   docs, and the retained plan. Full Windows PowerShell 5.1 verification passes
@@ -84,6 +100,16 @@ acceptance tests and explicit merge approval.
 ---
 
 ## Session Sync Log (newest first)
+
+### 2026-07-28 — Machine: G6-PF5DSHVY — Step 1 launcher fix
+
+- Changed: batch launcher argument boundary from `"%~dp0"` to `"%~dp0."`.
+- Changed: deterministic tests for actual, spaces, Unicode, and malformed
+  batch-to-PowerShell repository-root values.
+- Changed: Changelog and Handoff with root cause, verification, and pending
+  manual retest.
+- Note: the temporary implementation plan remains intentionally committed;
+  do not delete or merge until manual approval.
 
 ### 2026-07-28 — Machine: G6-PF5DSHVY — pushed with folder-name correction
 

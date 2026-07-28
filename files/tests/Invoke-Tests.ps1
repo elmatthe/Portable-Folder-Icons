@@ -42,6 +42,34 @@ function Assert-Throws {
     }
 }
 
+function Assert-BatchRepositoryRootBoundary {
+    param([string]$CheckoutPath, [string]$Name)
+
+    [void](New-Item -ItemType Directory -Path $CheckoutPath -Force)
+    $captureScript = Join-Path $CheckoutPath 'Capture-Root.ps1'
+    $captureBatch = Join-Path $CheckoutPath 'Capture-Root.bat'
+    $captureOutput = Join-Path $CheckoutPath 'captured.txt'
+    $captureScriptText = @'
+param([string]$RepositoryRoot, [string]$OutputPath)
+[IO.File]::WriteAllText(
+    $OutputPath,
+    $RepositoryRoot,
+    (New-Object Text.UTF8Encoding($false))
+)
+'@
+    $captureBatchText = @'
+@echo off
+setlocal DisableDelayedExpansion
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -File "%~dp0Capture-Root.ps1" -RepositoryRoot "%~dp0." -OutputPath "%~dp0captured.txt"
+endlocal
+'@
+    [IO.File]::WriteAllText($captureScript, $captureScriptText, (New-Object Text.UTF8Encoding($false)))
+    [IO.File]::WriteAllText($captureBatch, $captureBatchText, (New-Object Text.ASCIIEncoding))
+    & $env:ComSpec /d /c ('"{0}"' -f $captureBatch) *> $null
+    $captured = [IO.File]::ReadAllText($captureOutput)
+    Assert-Equal ([IO.Path]::GetFullPath($CheckoutPath)) ([IO.Path]::GetFullPath($captured)) $Name
+}
+
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('PfiTests-' + [guid]::NewGuid().ToString('N'))
 [void](New-Item -ItemType Directory -Path $testRoot)
 try {
@@ -49,6 +77,17 @@ try {
     Assert-Equal 'Work Projects' (ConvertTo-PfiMenuLabel 'Work__Projects.ico') 'normalizes underscores and whitespace'
     Assert-Equal 'MiXeD' (ConvertTo-PfiMenuLabel 'folder-MiXeD.ICO') 'preserves capitalization'
     Assert-Throws { ConvertTo-PfiMenuLabel 'Folder_.ico' } 'rejects empty label'
+
+    $actualAcceptancePath = 'C:\Users\ematthew\Portable-User-Installs\Portable-Folder-Icons'
+    Assert-Equal $actualAcceptancePath ([IO.Path]::GetFullPath($actualAcceptancePath + '\.')) 'actual acceptance path canonicalizes unchanged'
+    Assert-BatchRepositoryRootBoundary (Join-Path $testRoot 'Checkout With Spaces') 'batch preserves checkout path containing spaces'
+    Assert-BatchRepositoryRootBoundary (Join-Path $testRoot 'Checkout üñîçødé') 'batch preserves Unicode checkout path'
+    Assert-Throws {
+        [IO.Path]::GetFullPath($actualAcceptancePath + '"')
+    } 'exact malformed trailing quote is rejected'
+    $launcherText = Get-Content -LiteralPath (Join-Path $repoRoot 'Setup_and_Run-Portable-Folder-Icons.bat') -Raw
+    Assert-True ($launcherText.Contains('-RepositoryRoot "%~dp0."')) 'launcher protects trailing batch directory separator'
+    Assert-Equal $false ($launcherText.Contains('-RepositoryRoot "%~dp0"')) 'launcher does not use quote-escaping trailing separator pattern'
 
     $validIcon = Join-Path $repoRoot 'files\ICO-Files\Folder_Blue.ico'
     $validResult = Test-PfiIcoFile $validIcon

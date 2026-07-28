@@ -59,7 +59,7 @@ if not exist "%INSTALLER%" (
 
 echo Starting install/update/repair/rescan...
 echo.
-"%WINDOWS_POWERSHELL%" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%INSTALLER%" -RepositoryRoot "%~dp0"
+"%WINDOWS_POWERSHELL%" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%INSTALLER%" -RepositoryRoot "%~dp0."
 set "RESULT=%ERRORLEVEL%"
 
 :finish

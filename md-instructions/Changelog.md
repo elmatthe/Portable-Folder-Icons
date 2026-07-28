@@ -33,6 +33,10 @@
 
 ### Fixed
 
+- Corrected the batch-to-PowerShell repository-root argument boundary so a
+  trailing backslash cannot escape the closing quote and append an illegal
+  quote character before `GetFullPath`; checkout paths containing spaces and
+  Unicode remain intact.
 - Corrected the distributable icon-source directory spelling from
   `files\ICO-FIles` to `files\ICO-Files` across Git, runtime code, tests,
   configuration, and documentation.
