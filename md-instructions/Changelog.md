@@ -33,6 +33,11 @@
 
 ### Fixed
 
+- Replaced the ineffective ordinary `IWebBrowser2.Refresh()` call with a
+  targeted same-window `Navigate2` reload of each Explorer view displaying the
+  changed folder's parent. The stronger reload re-enumerates the displayed
+  child items while retaining the Explorer window and folder location;
+  selection and scroll position may reset.
 - Prevented reproducible one-state-behind Explorer rendering by preserving the
   identity of an existing desktop.ini during updates and replacing path-only
   invalidation for existing Shell items with synchronous canonical-PIDL

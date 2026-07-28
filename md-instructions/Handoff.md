@@ -4,11 +4,12 @@
 
 All implementation phases and the bug hunt are complete on
 `feature/v0.1.0-portable-folder-icons`. Setup and the repaired classic cascade
-passed manual testing. The first targeted-refresh repair failed manual testing
-because Explorer remained one or two customization states behind. A second,
-identity-preserving canonical-PIDL correction is verified automatically;
-waiting for the user to retest before continuing acceptance or considering a
-merge.
+passed manual testing. Two notification/ordinary-refresh repairs failed manual
+testing because the open Windows 11 parent view did not visibly re-enumerate
+its changed child. The parent view now receives a targeted same-location
+`Navigate2` reload after the filesystem commit and PIDL notifications. This is
+verified automatically and against the installed runtime; waiting for the user
+to retest before continuing acceptance or considering a merge.
 
 ---
 
@@ -16,16 +17,37 @@ merge.
 
 | # | Severity | File | Description | Status | Found by |
 |---|----------|------|-------------|--------|----------|
-| 1 | Critical | Explorer refresh | The first repair added four synchronous path notifications but atomically replaced existing `desktop.ini`, changing its NTFS identity while reporting an update. Explorer could retain the preceding cached shell-item state. Existing files are now updated in place and existing notification targets use canonical PIDLs. | Fixed / awaiting second user Step 7 retest | User |
+| 1 | Critical | Explorer refresh | Canonical PIDL notifications plus ordinary `IWebBrowser2.Refresh()` did not force the actual open Windows 11 parent view to re-enumerate its displayed child. The exact parent Shell-window object is now reloaded at its current URL with `Navigate2`; the window and folder location remain unchanged, while selection/scroll may reset. | Fixed / awaiting third user Step 7 retest | User |
 | 2 | Critical | Registry integration | The parent stored `ExtendedSubCommandsKey` as a child key instead of a REG_SZ reference, so Explorer treated **Folder Icons** as a plain executable verb; setup also left ten recognized prototype `FolderColor_*` verbs in place. | Fixed / manual retest passed | User |
 | 3 | Critical | `Setup_and_Run-Portable-Folder-Icons.bat` | Passing the trailing-backslash checkout root as `"%~dp0"` caused native PowerShell argument parsing to retain a closing quote in the value sent to `GetFullPath`. | Fixed / manual retest passed | User |
-| 4 | Minor | Explorer UI | Windows may still retain an item image briefly after all supported targeted notifications; zero-latency repaint cannot be guaranteed. | Mitigated / manual QA | Codex |
+| 4 | Minor | Explorer UI | The same-location parent-view reload is intentionally stronger and may reset that view's selection or scroll position. Actual icon rendering remains a user-only visual assertion. | Mitigated / manual QA | Codex |
 | 5 | Suggestion | Selection | Multi-folder apply needs safe multi-path transport and partial-failure UX. | Deferred beyond v0.1.0 per plan | User / Codex |
 
 ---
 
 ## Work Log (newest first)
 
+- 2026-07-28 — The identity-preserving canonical-PIDL repair also failed
+  manual testing: with `Shared-Resources` open, Apply remained stale until
+  navigation, while Reset happened to repaint immediately. Installed runtime
+  hashes exactly matched repository sources. Inspection proved the correct
+  Shell-window entry was selected by decoded `LocationURL`, but the final call
+  was only `IWebBrowser2.Refresh()`. Notifications update Shell state; they do
+  not compel an existing Windows 11 folder view to discard and re-enumerate
+  its displayed child items, and the ordinary browser refresh did not do so in
+  this environment. The final step now calls `Navigate2` on only the matched
+  Shell-window object with its unchanged current file URL. This rebuilds that
+  view at the same location; loss of selection/scroll is accepted, while other
+  tabs/windows are untouched. Tests now capture the exact HWND, same-location
+  URL, full-view invocation, non-parent exclusion, sequential filesystem
+  correctness, and PIDL cleanup. The Windows PowerShell 5.1 gate passes 152
+  assertions and all ten ICO validations. Normal setup accepted all ten ICOs.
+  With the real `Shared-Resources` Explorer tab open, an installed-runtime
+  Blue → Red → Reset → Black sequence on a uniquely named disposable child
+  matched and reloaded exactly one Shell view (HWND 459518) after every action;
+  current icon resources matched every requested state, and Explorer PIDs and
+  all tab locations remained unchanged. The diagnostic child was removed.
+  Visual rendered-state acceptance remains with the user. — Codex
 - 2026-07-28 — Manual retesting showed reproducible state lag after the first
   refresh repair: Apply/Reset eventually worked, but Explorer rendered the
   preceding or second-preceding icon. A disposable

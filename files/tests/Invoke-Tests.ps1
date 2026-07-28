@@ -89,14 +89,18 @@ function Get-TestRegistrySnapshot {
 }
 
 function New-TestExplorerWindow {
-    param([string]$LocationUrl)
+    param([string]$LocationUrl, [long]$WindowHandle = 0)
 
     $window = [pscustomobject]@{
         LocationURL = $LocationUrl
-        Refreshed = $false
+        HWND = $WindowHandle
+        Navigated = $false
+        NavigatedUrl = ''
     }
-    $window | Add-Member -MemberType ScriptMethod -Name Refresh -Value {
-        $this.Refreshed = $true
+    $window | Add-Member -MemberType ScriptMethod -Name Navigate2 -Value {
+        param($Url)
+        $this.Navigated = $true
+        $this.NavigatedUrl = [string]$Url
     }
     return $window
 }
@@ -429,10 +433,10 @@ try {
     }
     $matchingWindow = New-TestExplorerWindow ((New-Object Uri(
         ([IO.Path]::GetFullPath((Split-Path -Parent $specialFolder)) + '\')
-    )).AbsoluteUri)
+    )).AbsoluteUri) 101
     $otherWindow = New-TestExplorerWindow ((New-Object Uri(
         ([IO.Path]::GetFullPath($specialFolder) + '\')
-    )).AbsoluteUri)
+    )).AbsoluteUri) 202
     $windowBoundary = { @($matchingWindow, $otherWindow) }
     $refreshResult = Send-PfiExplorerRefresh -FolderPath $specialFolder `
         -DesktopIniChange Update -NotificationAction $notificationBoundary `
@@ -444,9 +448,12 @@ try {
     Assert-Equal ([IO.Path]::GetFullPath((Join-Path $specialFolder 'desktop.ini'))) $notificationLog[0].Path 'refresh targets desktop.ini'
     Assert-Equal ([IO.Path]::GetFullPath($specialFolder).TrimEnd('\')) $notificationLog[1].Path 'refresh targets customized folder attributes'
     Assert-Equal ([IO.Path]::GetFullPath((Split-Path -Parent $specialFolder)).TrimEnd('\')) $notificationLog[3].Path 'refresh targets parent directory'
-    Assert-Equal $true $matchingWindow.Refreshed 'Explorer view displaying parent is refreshed'
-    Assert-Equal $false $otherWindow.Refreshed 'Explorer view displaying customized folder is not refreshed'
+    Assert-Equal $true $matchingWindow.Navigated 'Explorer view displaying parent is fully reloaded'
+    Assert-Equal $matchingWindow.LocationURL $matchingWindow.NavigatedUrl 'full reload retains the parent location'
+    Assert-Equal $false $otherWindow.Navigated 'Explorer view displaying customized folder is not reloaded'
     Assert-Equal 1 $refreshResult.MatchedExplorerWindows 'only the parent Explorer view is selected'
+    Assert-Equal 101 $refreshResult.RefreshedWindowHandles[0] 'refresh result identifies the exact matched Explorer window'
+    Assert-Equal 'Navigate2CurrentLocation' $refreshResult.ViewRefreshMechanism 'refresh uses targeted current-location navigation'
     [PortableFolderIcons.NativeMethods]::ValidatePidl($specialFolder)
     Assert-Equal 0 ([PortableFolderIcons.NativeMethods]::OutstandingPidls) 'canonical PIDL allocation is released'
 

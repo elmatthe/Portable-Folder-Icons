@@ -136,7 +136,8 @@ function Send-PfiExplorerRefresh {
         [ValidateSet('Create', 'Update', 'Delete', 'None')]
         [string]$DesktopIniChange = 'Update',
         [scriptblock]$NotificationAction,
-        [scriptblock]$ExplorerWindowsProvider
+        [scriptblock]$ExplorerWindowsProvider,
+        [scriptblock]$FullViewRefreshAction
     )
 
     $folder = [IO.Path]::GetFullPath($FolderPath).TrimEnd('\')
@@ -234,6 +235,16 @@ namespace PortableFolderIcons {
             return @($shell.Windows())
         }
     }
+    if ($null -eq $FullViewRefreshAction) {
+        $FullViewRefreshAction = {
+            param($ExplorerWindow, [string]$LocationUrl)
+            # IWebBrowser2.Navigate2 reloads the existing Shell window at its
+            # current namespace location. Unlike IWebBrowser2.Refresh(), this
+            # rebuilds the folder view and its displayed child items. The
+            # window and location are retained; selection/scroll may reset.
+            $ExplorerWindow.Navigate2($LocationUrl)
+        }
+    }
 
     $warnings = New-Object System.Collections.Generic.List[string]
     $notifications = New-Object System.Collections.Generic.List[object]
@@ -295,17 +306,22 @@ namespace PortableFolderIcons {
 
     $matchedWindows = 0
     $refreshedWindows = 0
+    $refreshedWindowHandles = New-Object System.Collections.Generic.List[long]
     try {
         foreach ($window in @(& $ExplorerWindowsProvider)) {
             try {
                 if ([string]::IsNullOrWhiteSpace([string]$window.LocationURL)) { continue }
-                $uri = New-Object Uri([string]$window.LocationURL)
+                $locationUrl = [string]$window.LocationURL
+                $uri = New-Object Uri($locationUrl)
                 if (-not $uri.IsFile) { continue }
                 $location = [IO.Path]::GetFullPath($uri.LocalPath).TrimEnd('\')
                 if ($location.Equals($parent, [StringComparison]::OrdinalIgnoreCase)) {
                     $matchedWindows++
-                    $window.Refresh()
+                    & $FullViewRefreshAction $window $locationUrl
                     $refreshedWindows++
+                    if ($null -ne $window.PSObject.Properties['HWND']) {
+                        $refreshedWindowHandles.Add([long]$window.HWND)
+                    }
                 }
             }
             catch {
@@ -331,6 +347,8 @@ namespace PortableFolderIcons {
         Parent = $parent
         MatchedExplorerWindows = $matchedWindows
         RefreshedExplorerWindows = $refreshedWindows
+        RefreshedWindowHandles = $refreshedWindowHandles.ToArray()
+        ViewRefreshMechanism = 'Navigate2CurrentLocation'
         RefreshSucceeded = ($issued -eq $notifications.Count -and $warnings.Count -eq 0)
         Warnings = $warnings.ToArray()
     }
