@@ -5,6 +5,44 @@ entries appear first.
 
 ---
 
+## 007 — Retain content-hashed icons across repair and uninstall — 2026-07-28 — Codex
+
+**Status:** Accepted
+**Context:** Existing customized folders store absolute paths to installed
+icons and must survive source rename/replacement or ordinary uninstall.
+**Decision:** Cache by full SHA-256, never overwrite different content in
+place, never prune old hashes during setup/repair, and preserve the cache by
+default during uninstall.
+**Alternatives considered:** Filename caches and ordinary uninstall cleanup
+would break already-customized folders.
+**Consequences:** Cache storage grows until the user explicitly accepts the
+warned purge option.
+
+## 006 — Install a stable self-contained LocalAppData runtime — 2026-07-28 — Codex
+
+**Status:** Accepted
+**Context:** Context-menu commands and applied folder icons must continue to
+work when the repository moves or is deleted.
+**Decision:** Stage and validate a complete runtime, manifest, and hashed icon
+cache beneath `%LOCALAPPDATA%\Portable-Folder-Icons`; registry commands point
+only there.
+**Alternatives considered:** Calling repository scripts is simpler but not
+portable after setup; Program Files needs elevation.
+**Consequences:** Repository setup performs explicit update/rescan, while
+installed Repair can operate independently.
+
+## 005 — Use only inbox Windows PowerShell and built-in APIs — 2026-07-28 — Codex
+
+**Status:** Accepted
+**Context:** The target user may lack admin rights, Python, package managers,
+and network access.
+**Decision:** Target Windows PowerShell 5.1 with built-in .NET, registry,
+COM, and Win32 APIs; add no Python environment or third-party dependency.
+**Alternatives considered:** Python would add runtime/setup overhead; a
+compiled extension would add deployment and security complexity.
+**Consequences:** The implementation stays auditable and offline, with tests
+written as a self-contained PowerShell harness.
+
 ## 004 — Targeted Shell refresh without Explorer restart — 2026-07-28 — Codex
 
 **Status:** Accepted

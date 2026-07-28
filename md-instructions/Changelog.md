@@ -19,8 +19,14 @@
   UTF-16LE `desktop.ini` writes, narrow attribute changes, recovery backups,
   protected-target checks, Shell change notification, and parent-window-only
   Explorer refresh.
+- Added repository-independent Repair, confirmed Uninstall with default
+  hash-cache preservation and separately warned purge, post-exit self-cleanup,
+  full end-user documentation, architecture ADRs, and comprehensive
+  PowerShell verification/security gates.
 
 ### Changed
 
 - Converted the generic scaffold metadata and permanent documentation into a
   Windows-only pure-PowerShell project.
+- Hardened staged updates to restore the prior runtime, manifest, and menu when
+  activation or registration fails.

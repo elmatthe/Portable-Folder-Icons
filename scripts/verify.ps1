@@ -47,7 +47,13 @@ $required = @(
     'md-instructions\Decisions.md',
     'md-instructions\Handoff.md',
     'scripts\verify.ps1'
+    'scripts\Windows\Cleanup-PortableFolderIcons.ps1'
+    'scripts\Windows\Install-PortableFolderIcons.ps1'
+    'scripts\Windows\Invoke-PortableFolderIcons.ps1'
+    'scripts\Windows\PortableFolderIcons.Actions.ps1'
     'scripts\Windows\PortableFolderIcons.Core.ps1'
+    'scripts\Windows\PortableFolderIcons.Integration.ps1'
+    'scripts\Windows\PortableFolderIcons.Maintenance.ps1'
 )
 foreach ($relativePath in $required) {
     if (Test-Path -LiteralPath (Join-Path $repoRoot $relativePath) -PathType Leaf) {
@@ -111,6 +117,93 @@ if ($changelog -match '(?m)^## v0\.1\.0\b') {
 }
 else {
     Add-CheckFailure 'missing v0.1.0 changelog entry'
+}
+
+$allowedRootNames = @(
+    '.agents', '.claude', '.codex', '.git', '.vscode',
+    'files', 'md-instructions', 'scripts',
+    '.gitattributes', '.gitignore', 'AI-WORKSPACE.md', 'LICENSE', 'README.md',
+    'config.toml', 'Map-Repo-Structure.bat',
+    'Setup_and_Run-Portable-Folder-Icons.bat',
+    'Setup_and_Run-Portable-Folder-Icons.command'
+)
+$unexpectedRoot = @(Get-ChildItem -LiteralPath $repoRoot -Force | Where-Object {
+    $_.Name -notin $allowedRootNames
+})
+if ($unexpectedRoot.Count -eq 0) {
+    Add-CheckPass 'clean allowed root layout'
+}
+else {
+    Add-CheckFailure ('forbidden root item(s): {0}' -f (($unexpectedRoot.Name | Sort-Object) -join ', '))
+}
+
+$shippedFiles = @(
+    Get-ChildItem -LiteralPath (Join-Path $repoRoot 'scripts\Windows') -Filter '*.ps1' -File
+)
+$shippedFiles += Get-Item -LiteralPath (Join-Path $repoRoot 'Setup_and_Run-Portable-Folder-Icons.bat')
+$shippedText = ($shippedFiles | ForEach-Object {
+    Get-Content -LiteralPath $_.FullName -Raw
+}) -join "`n"
+$forbiddenPatterns = [ordered]@{
+    'hardcoded user checkout path' = 'C:\\Users\\ematthew'
+    'HKLM registry write/reference' = '(?i)\bHKLM(?::|\\)'
+    'Explorer process termination/restart' = '(?i)(Stop-Process|taskkill|TerminateProcess).{0,80}explorer'
+    'Python/pip/venv setup' = '(?i)(python(?:\.exe)?\s+-m|\bpip(?:\.exe)?\s+install|\bwinget\s+install|\.venv)'
+    'network download code' = '(?i)(Invoke-WebRequest|Start-BitsTransfer|curl\.exe|wget\.exe|https?://)'
+}
+foreach ($check in $forbiddenPatterns.GetEnumerator()) {
+    if ($shippedText -match $check.Value) {
+        Add-CheckFailure $check.Key
+    }
+    else {
+        Add-CheckPass ('no {0}' -f $check.Key)
+    }
+}
+
+$config = Get-Content -LiteralPath (Join-Path $repoRoot 'config.toml') -Raw
+if ($config -match 'version\s*=\s*"0\.1\.0"' -and
+    $config -match 'requires_python\s*=\s*false' -and
+    $config -match 'windows\s*=\s*true' -and
+    $config -match 'macos\s*=\s*false') {
+    Add-CheckPass 'config.toml v0.1.0 Windows-only metadata'
+}
+else {
+    Add-CheckFailure 'config.toml metadata is incomplete or inaccurate'
+}
+
+$briefing = Get-Content -LiteralPath (Join-Path $repoRoot 'md-instructions\Briefing.md') -Raw
+$readme = Get-Content -LiteralPath (Join-Path $repoRoot 'README.md') -Raw
+if ($briefing -match 'v0\.1\.0' -and $readme -match 'SmartScreen' -and
+    $readme -match 'Uninstall' -and $readme -match 'License and icon rights') {
+    Add-CheckPass 'required v0.1.0 documentation'
+}
+else {
+    Add-CheckFailure 'required v0.1.0 documentation is incomplete'
+}
+
+if ($PSVersionTable.PSVersion.Major -eq 5 -and $PSVersionTable.PSVersion.Minor -ge 1) {
+    Add-CheckPass ('running under Windows PowerShell {0}' -f $PSVersionTable.PSVersion)
+}
+else {
+    Add-CheckFailure ('verification must run under Windows PowerShell 5.1; actual {0}' -f $PSVersionTable.PSVersion)
+}
+
+$git = Get-Command git.exe -ErrorAction SilentlyContinue
+if ($null -ne $git) {
+    $savedErrorPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $diffCheck = & $git.Source -C $repoRoot diff --check 2>&1
+    $diffExit = $LASTEXITCODE
+    $ErrorActionPreference = $savedErrorPreference
+    if ($diffExit -eq 0) {
+        Add-CheckPass 'git diff --check'
+    }
+    else {
+        Add-CheckFailure ('git diff --check: {0}' -f ($diffCheck -join ' '))
+    }
+}
+else {
+    Add-CheckFailure 'git.exe is required for the diff whitespace gate'
 }
 
 if ($script:Failures.Count -gt 0) {

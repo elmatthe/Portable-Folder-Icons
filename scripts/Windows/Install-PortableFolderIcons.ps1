@@ -64,8 +64,12 @@ $manifestPath = Join-Path $InstallRoot 'manifest.json'
 $stageRoot = Join-Path $InstallRoot ('.stage-' + [guid]::NewGuid().ToString('N'))
 $stageRuntime = Join-Path $stageRoot 'runtime'
 $oldRuntime = Join-Path $InstallRoot ('.runtime-old-' + [guid]::NewGuid().ToString('N'))
+$oldManifest = Join-Path $InstallRoot ('.manifest-old-' + [guid]::NewGuid().ToString('N') + '.json')
 $runtimeMoved = $false
 $runtimeActivated = $false
+$manifestMoved = $false
+$manifestActivated = $false
+$previousManifest = $null
 
 try {
     if (-not (Test-Path -LiteralPath $sourceScripts -PathType Container)) {
@@ -80,8 +84,19 @@ try {
     Write-Host 'Staging and validating runtime scripts...'
 
     $runtimeSources = @(Get-ChildItem -LiteralPath $sourceScripts -Filter '*.ps1' -File | Sort-Object Name)
-    if ($runtimeSources.Count -lt 5) {
-        throw 'The staged runtime is incomplete.'
+    $requiredRuntime = @(
+        'Cleanup-PortableFolderIcons.ps1',
+        'Install-PortableFolderIcons.ps1',
+        'Invoke-PortableFolderIcons.ps1',
+        'PortableFolderIcons.Actions.ps1',
+        'PortableFolderIcons.Core.ps1',
+        'PortableFolderIcons.Integration.ps1',
+        'PortableFolderIcons.Maintenance.ps1'
+    )
+    foreach ($requiredName in $requiredRuntime) {
+        if ($requiredName -notin @($runtimeSources.Name)) {
+            throw "The staged runtime is incomplete: $requiredName is missing."
+        }
     }
     foreach ($source in $runtimeSources) {
         Copy-Item -LiteralPath $source.FullName -Destination (Join-Path $stageRuntime $source.Name)
@@ -122,9 +137,15 @@ try {
         Move-Item -LiteralPath $runtimePath -Destination $oldRuntime
         $runtimeMoved = $true
     }
+    if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+        try { $previousManifest = Read-PfiManifest -LiteralPath $manifestPath } catch { $previousManifest = $null }
+        Move-Item -LiteralPath $manifestPath -Destination $oldManifest
+        $manifestMoved = $true
+    }
     Move-Item -LiteralPath $stageRuntime -Destination $runtimePath
     $runtimeActivated = $true
-    Move-Item -LiteralPath $stagedManifest -Destination $manifestPath -Force
+    Move-Item -LiteralPath $stagedManifest -Destination $manifestPath
+    $manifestActivated = $true
 
     if (-not $SkipRegistry) {
         [void](Register-PfiContextMenu -Manifest (Read-PfiManifest $manifestPath) -InstallRoot $InstallRoot)
@@ -134,6 +155,11 @@ try {
         [void](Assert-PfiPathWithinRoot -CandidatePath $oldRuntime -AllowedRoot $InstallRoot)
         Remove-Item -LiteralPath $oldRuntime -Recurse -Force
         $runtimeMoved = $false
+    }
+    if ($manifestMoved -and (Test-Path -LiteralPath $oldManifest -PathType Leaf)) {
+        [void](Assert-PfiPathWithinRoot -CandidatePath $oldManifest -AllowedRoot $InstallRoot)
+        Remove-Item -LiteralPath $oldManifest -Force
+        $manifestMoved = $false
     }
 
     Write-SetupSummary -Inventory $inventory
@@ -150,11 +176,23 @@ try {
 }
 catch {
     [Console]::Error.WriteLine(('ERROR: {0}' -f $_.Exception.Message))
-    if (-not $runtimeActivated -and $runtimeMoved -and
-        (Test-Path -LiteralPath $oldRuntime -PathType Container) -and
-        -not (Test-Path -LiteralPath $runtimePath)) {
+    if ($runtimeMoved -and (Test-Path -LiteralPath $oldRuntime -PathType Container)) {
+        if (Test-Path -LiteralPath $runtimePath -PathType Container) {
+            [void](Assert-PfiPathWithinRoot -CandidatePath $runtimePath -AllowedRoot $InstallRoot)
+            Remove-Item -LiteralPath $runtimePath -Recurse -Force
+        }
         Move-Item -LiteralPath $oldRuntime -Destination $runtimePath
-        $runtimeMoved = $false
+    }
+    if ($manifestMoved -and (Test-Path -LiteralPath $oldManifest -PathType Leaf)) {
+        if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+            [void](Assert-PfiPathWithinRoot -CandidatePath $manifestPath -AllowedRoot $InstallRoot)
+            Remove-Item -LiteralPath $manifestPath -Force
+        }
+        Move-Item -LiteralPath $oldManifest -Destination $manifestPath
+    }
+    if (-not $SkipRegistry -and $null -ne $previousManifest) {
+        try { [void](Register-PfiContextMenu -Manifest $previousManifest -InstallRoot $InstallRoot) }
+        catch { [Console]::Error.WriteLine('WARNING: Previous context menu could not be restored automatically.') }
     }
     exit 20
 }

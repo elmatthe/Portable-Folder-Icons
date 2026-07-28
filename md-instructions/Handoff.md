@@ -2,8 +2,8 @@
 
 ## Current Focus
 
-Phases 0–4 are complete and verified. Phase 5 Repair, Uninstall,
-documentation, and hardening is next on the working branch.
+Phases 0–5 are complete and verified. Phase 6 systematic bug hunt and
+manual-test handoff is next on the working branch.
 
 ---
 
@@ -17,6 +17,13 @@ documentation, and hardening is next on the working branch.
 
 ## Work Log (newest first)
 
+- 2026-07-28 — Phase 5 checkpoint passed under Windows PowerShell 5.1. Added
+  installed runtime/cache integrity Repair, exact-scope confirmed Uninstall,
+  default cache preservation, separately warned purge, post-exit cleanup,
+  staged-update rollback, comprehensive README/config/permanent docs, and
+  final gates for root layout, forbidden code, metadata, docs, parsing, all
+  ICOs, tests, PowerShell version, and `git diff --check`. 69 assertions and
+  the complete verify gate pass. — Codex
 - 2026-07-28 — Phase 4 checkpoint passed under Windows PowerShell 5.1. Added
   protected/root/filesystem target checks, manifest/hash-resolved Apply,
   cached-icon integrity verification, recoverable UTF-16LE `desktop.ini`
@@ -62,6 +69,14 @@ documentation, and hardening is next on the working branch.
 ---
 
 ## Session Sync Log (newest first)
+
+### 2026-07-28 — Machine: G6-PF5DSHVY — pushed with Phase 5 checkpoint
+
+- Added: `scripts/Windows/PortableFolderIcons.Maintenance.ps1`.
+- Added: `scripts/Windows/Cleanup-PortableFolderIcons.ps1`.
+- Deleted: legacy `scripts/SetFolderColor.ps1` (preserved in baseline history).
+- Changed: installer/dispatcher, tests, verify gate, README, Briefing,
+  Changelog, Decisions, and Handoff for Phase 5.
 
 ### 2026-07-28 — Machine: G6-PF5DSHVY — pushed with Phase 4 checkpoint
 

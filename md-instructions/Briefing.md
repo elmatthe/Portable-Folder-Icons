@@ -50,5 +50,6 @@ v0.1.0
 
 ## High-Level State
 
-Implementation is in progress on the v0.1.0 feature branch. See `Handoff.md`
-for phase-level state and remaining acceptance tests.
+The v0.1.0 feature set is implemented through Phase 5. Automated verification
+is green; the systematic bug hunt and user-run Explorer acceptance pass remain
+before approval to merge. See `Handoff.md` for live details.

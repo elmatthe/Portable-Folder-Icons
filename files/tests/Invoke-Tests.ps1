@@ -6,6 +6,7 @@ $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 . (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Core.ps1')
 . (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Integration.ps1')
 . (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Actions.ps1')
+. (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Maintenance.ps1')
 Add-Type -AssemblyName System.Drawing
 
 $script:Passed = 0
@@ -207,6 +208,10 @@ try {
     } 'apply rejects malformed existing desktop.ini'
     Assert-Equal "[broken`r`nKeep=This" ([IO.File]::ReadAllText($malformedIni)) 'malformed desktop.ini remains unchanged'
 
+    $repairResult = Invoke-PfiRepair -InstallRoot $installRoot -SkipRegistry
+    Assert-Equal 10 $repairResult.ValidatedIcons 'repair validates all installed cached icons'
+    Assert-Equal $false $repairResult.ImportedRepositoryIcons 'repair never claims repository import'
+
     $corruptCachePath = Join-Path (Join-Path $installRoot 'icons') $actionEntry.cachedFilename
     [IO.File]::WriteAllText($corruptCachePath, 'corrupt')
     $integrityFolder = Join-Path $testRoot 'Integrity Target'
@@ -216,6 +221,26 @@ try {
             -InstallRoot $installRoot -SkipRefresh
     } 'apply rejects cached ICO with wrong hash'
     Assert-Equal $false (Test-Path -LiteralPath (Join-Path $integrityFolder 'desktop.ini')) 'hash failure leaves target unchanged'
+    Assert-Throws { Invoke-PfiRepair -InstallRoot $installRoot -SkipRegistry } 'repair reports corrupt installed cache'
+
+    # Recreate a clean cache in a second test-owned root for uninstall behavior.
+    $uninstallRoot = Join-Path $testRoot 'stable install ünicode'
+    Remove-Item -LiteralPath $uninstallRoot -Recurse -Force
+    & $windowsPowerShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $installer `
+        -RepositoryRoot $repoRoot -InstallRoot $uninstallRoot -SkipRegistry *> $null
+    $uninstallIconCount = @(Get-ChildItem -LiteralPath (Join-Path $uninstallRoot 'icons') -Filter '*.ico').Count
+    $uninstallResult = Invoke-PfiUninstall -InstallRoot $uninstallRoot -Confirmed -SkipRegistry
+    Assert-Equal $true $uninstallResult.CachePreserved 'uninstall preserves cache by default'
+    Assert-Equal $false (Test-Path -LiteralPath (Join-Path $uninstallRoot 'runtime')) 'uninstall removes runtime'
+    Assert-Equal $false (Test-Path -LiteralPath (Join-Path $uninstallRoot 'manifest.json')) 'uninstall removes active manifest'
+    Assert-Equal $uninstallIconCount @(Get-ChildItem -LiteralPath (Join-Path $uninstallRoot 'icons') -Filter '*.ico').Count 'uninstall leaves cached icons intact'
+    [void](Invoke-PfiUninstall -InstallRoot $uninstallRoot -Confirmed -SkipRegistry)
+    Assert-True (Test-Path -LiteralPath (Join-Path $uninstallRoot 'icons')) 'second uninstall is safe'
+
+    & $windowsPowerShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $installer `
+        -RepositoryRoot $repoRoot -InstallRoot $uninstallRoot -SkipRegistry *> $null
+    [void](Invoke-PfiUninstall -InstallRoot $uninstallRoot -Confirmed -PurgeCache -SkipRegistry)
+    Assert-Equal $false (Test-Path -LiteralPath (Join-Path $uninstallRoot 'icons')) 'explicit purge removes cache'
 }
 finally {
     if (Test-Path -LiteralPath $testRoot) {
