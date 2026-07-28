@@ -61,13 +61,15 @@ function New-PfiActionCommand {
         (ConvertTo-PfiQuotedCommandArgument $PowerShellPath),
         '-NoLogo',
         '-NoProfile',
-        '-WindowStyle Hidden',
         '-ExecutionPolicy Bypass',
         '-File',
         (ConvertTo-PfiQuotedCommandArgument $ActionScriptPath),
         '-Action',
         $Action
     )
+    if ($Action -notin @('Apply', 'Reset')) {
+        $parts = @($parts[0..2]) + @('-WindowStyle Hidden') + @($parts[3..($parts.Count - 1)])
+    }
     if (-not [string]::IsNullOrWhiteSpace($IconHash)) {
         if ($IconHash -notmatch '^[a-fA-F0-9]{64}$') {
             throw 'Icon identity must be a full SHA-256 hash.'

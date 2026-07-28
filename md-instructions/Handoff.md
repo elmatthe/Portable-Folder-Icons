@@ -4,12 +4,12 @@
 
 All implementation phases and the bug hunt are complete on
 `feature/v0.1.0-portable-folder-icons`. Setup and the repaired classic cascade
-passed manual testing. Two notification/ordinary-refresh repairs failed manual
-testing because the open Windows 11 parent view did not visibly re-enumerate
-its changed child. The parent view now receives a targeted same-location
-`Navigate2` reload after the filesystem commit and PIDL notifications. This is
-verified automatically and against the installed runtime; waiting for the user
-to retest before continuing acceptance or considering a merge.
+passed manual testing. Three notification/refresh repairs failed manual
+testing because the open Windows 11 parent view retained the customized
+folder's system image-list entry. Apply now uses a unique folder-scoped ICO
+resource and navigates only the matching tab out and back with completion
+tracking. This is verified automatically and against the installed runtime;
+the rendered result still requires user acceptance before any merge.
 
 ---
 
@@ -17,7 +17,7 @@ to retest before continuing acceptance or considering a merge.
 
 | # | Severity | File | Description | Status | Found by |
 |---|----------|------|-------------|--------|----------|
-| 1 | Critical | Explorer refresh | Canonical PIDL notifications plus ordinary `IWebBrowser2.Refresh()` did not force the actual open Windows 11 parent view to re-enumerate its displayed child. The exact parent Shell-window object is now reloaded at its current URL with `Navigate2`; the window and folder location remain unchanged, while selection/scroll may reset. | Fixed / awaiting third user Step 7 retest | User |
+| 1 | Critical | Explorer refresh | Notifications, ordinary refresh, and same-URL navigation all left the customized folder on one stale system image-list slot. Apply now creates a unique folder-scoped ICO resource and navigates the exact matching tab out and back, waiting for both canonical locations to complete. | Fixed / awaiting fourth user Step 7 retest | User |
 | 2 | Critical | Registry integration | The parent stored `ExtendedSubCommandsKey` as a child key instead of a REG_SZ reference, so Explorer treated **Folder Icons** as a plain executable verb; setup also left ten recognized prototype `FolderColor_*` verbs in place. | Fixed / manual retest passed | User |
 | 3 | Critical | `Setup_and_Run-Portable-Folder-Icons.bat` | Passing the trailing-backslash checkout root as `"%~dp0"` caused native PowerShell argument parsing to retain a closing quote in the value sent to `GetFullPath`. | Fixed / manual retest passed | User |
 | 4 | Minor | Explorer UI | The same-location parent-view reload is intentionally stronger and may reset that view's selection or scroll position. Actual icon rendering remains a user-only visual assertion. | Mitigated / manual QA | Codex |
@@ -27,6 +27,29 @@ to retest before continuing acceptance or considering a merge.
 
 ## Work Log (newest first)
 
+- 2026-07-28 — Manual acceptance after `c17e663` failed: Blue, Red, and
+  post-Reset Black remained stale while Reset was immediate. Installed runtime
+  hashes matched source. Diagnostic `SHGetFileInfo` calls proved Blue, Red,
+  and Black reused system image-list slot 239 while Reset selected standard
+  folder slot 3. Changing to a uniquely named ICO alone did not change slot
+  239, and Microsoft's targeted `SHUpdateImage` did not replace its old bitmap,
+  so neither was shipped alone. Same-URL `Navigate2` was also being optimized
+  away. The correction combines a unique per-Apply resource beneath
+  `icons\applied` with an actual away-and-back navigation of only the matched
+  Shell tab. Both legs wait on that object's canonical filesystem location and
+  Busy state, not a sleep. Superseded generated resources are deleted only
+  when their filename prefix matches the selected folder's canonical-path
+  hash. Apply/Reset commands no longer use a hidden terminal and report four/
+  three progress stages before the completion dialog. Tests cover unique
+  identity/content, narrow cleanup, rapid sequences, exact tab targeting,
+  away/back completion, PIDL cleanup, visible commands, and existing
+  regressions. An early installed diagnostic exposed and fixed a trailing-URL
+  normalization bug that could leave the tab at Downloads. The corrected
+  installed Blue → Red → Reset → Black exercise matched/reloaded exactly one
+  view each time, returned to Shared-Resources after every action, preserved
+  Explorer PIDs, and stored the expected resource hash after each Apply.
+  Programmatic verification does not assert the rendered pixels; user visual
+  acceptance remains required. — Codex
 - 2026-07-28 — The identity-preserving canonical-PIDL repair also failed
   manual testing: with `Shared-Resources` open, Apply remained stale until
   navigation, while Reset happened to repaint immediately. Installed runtime
@@ -200,6 +223,19 @@ to retest before continuing acceptance or considering a merge.
 ---
 
 ## Session Sync Log (newest first)
+
+### 2026-07-28 — Machine: G6-PF5DSHVY — versioned resource and full-tab reload repair
+
+- Changed: Apply creates unique folder-scoped ICO resources and narrowly
+  removes superseded resources for that selected folder.
+- Changed: the matching Explorer tab is navigated out and back with
+  canonical-path completion tracking; Apply/Reset progress is visible.
+- Changed: tests cover resource identity/content/lifecycle, exact tab
+  targeting, sequential actions, and completion ordering.
+- Changed: README, Briefing, Decisions, Changelog, and Handoff record the
+  failed third retest, evidence, correction, and pending visual acceptance.
+- Note: the temporary implementation plan remains intentionally committed;
+  do not delete or merge until manual approval.
 
 ### 2026-07-28 — Machine: G6-PF5DSHVY — canonical PIDL refresh correction
 

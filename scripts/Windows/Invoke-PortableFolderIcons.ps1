@@ -23,7 +23,7 @@ try {
             $actionResult = Invoke-PfiApply -TargetPath $TargetPath -IconHash $IconHash -InstallRoot $installRoot
         }
         'Reset' {
-            $actionResult = Invoke-PfiReset -TargetPath $TargetPath
+            $actionResult = Invoke-PfiReset -TargetPath $TargetPath -InstallRoot $installRoot
         }
         'Repair' {
             $repair = Invoke-PfiRepair -InstallRoot $installRoot

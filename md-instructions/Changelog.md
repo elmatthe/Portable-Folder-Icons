@@ -33,6 +33,13 @@
 
 ### Fixed
 
+- Prevented reuse of a stale customized-folder system image-list entry by
+  giving each Apply a unique folder-scoped ICO resource identity and fully
+  navigating only the matching parent Explorer tab out and back. Navigation
+  completion is verified from canonical filesystem paths and the tab's Busy
+  state without a fixed delay; Apply/Reset now keep a progress terminal
+  visible, and superseded folder-owned generated resources are removed
+  narrowly.
 - Replaced the ineffective ordinary `IWebBrowser2.Refresh()` call with a
   targeted same-window `Navigate2` reload of each Explorer view displaying the
   changed folder's parent. The stronger reload re-enumerates the displayed

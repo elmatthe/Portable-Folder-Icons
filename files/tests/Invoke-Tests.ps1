@@ -94,13 +94,17 @@ function New-TestExplorerWindow {
     $window = [pscustomobject]@{
         LocationURL = $LocationUrl
         HWND = $WindowHandle
+        Busy = $false
         Navigated = $false
         NavigatedUrl = ''
+        NavigationHistory = New-Object System.Collections.Generic.List[string]
     }
     $window | Add-Member -MemberType ScriptMethod -Name Navigate2 -Value {
         param($Url)
         $this.Navigated = $true
         $this.NavigatedUrl = [string]$Url
+        $this.NavigationHistory.Add([string]$Url)
+        $this.LocationURL = [string]$Url
     }
     return $window
 }
@@ -352,12 +356,13 @@ try {
         "[.ShellClassInfo]`r`nInfoTip=Preserve this`r`n[ViewState]`r`nFolderType=Generic`r`n"
     )
     $actionEntry = @($installedManifest.entries | Where-Object validationState -eq 'Accepted')[0]
-    [void](Invoke-PfiApply -TargetPath @($actionFolder) -IconHash $actionEntry.hash `
-        -InstallRoot $installRoot -SkipRefresh)
+    $actionApply = Invoke-PfiApply -TargetPath @($actionFolder) -IconHash $actionEntry.hash `
+        -InstallRoot $installRoot -SkipRefresh
     $afterApply = [IO.File]::ReadAllText($actionIni)
     Assert-True ($afterApply.Contains('InfoTip=Preserve this')) 'filesystem apply preserves unrelated desktop.ini key'
     Assert-True ($afterApply.Contains('[ViewState]')) 'filesystem apply preserves unrelated desktop.ini section'
-    Assert-True (($afterApply -match 'IconResource=.*\\icons\\[a-f0-9]{64}\.ico,0')) 'filesystem apply uses stable cached hash path'
+    Assert-True (($afterApply -match 'IconResource=.*\\icons\\applied\\[a-f0-9]{64}-[a-f0-9]{32}\.ico,0')) 'filesystem apply uses unique per-application resource path'
+    Assert-Equal $actionEntry.hash (Get-PfiSha256 $actionApply.IconResource) 'generated application resource preserves selected ICO content'
     $iniBytes = [IO.File]::ReadAllBytes($actionIni)
     Assert-True ($iniBytes.Length -ge 2 -and $iniBytes[0] -eq 0xFF -and $iniBytes[1] -eq 0xFE) 'filesystem apply writes UTF-16LE BOM'
     Assert-True (([IO.File]::GetAttributes($actionIni) -band [IO.FileAttributes]::Hidden) -ne 0) 'filesystem apply sets desktop.ini Hidden'
@@ -377,6 +382,12 @@ try {
     $specialOriginalAttributes = [IO.File]::GetAttributes($specialFolder) -bor
         [IO.FileAttributes]::NotContentIndexed
     [IO.File]::SetAttributes($specialFolder, $specialOriginalAttributes)
+    $generatedTestRoot = Join-Path (Join-Path $installRoot 'icons') 'applied'
+    [void](New-Item -ItemType Directory -Path $generatedTestRoot -Force)
+    $unrelatedGeneratedResource = Join-Path $generatedTestRoot (
+        ('f' * 64) + '-' + [guid]::NewGuid().ToString('N') + '.ico'
+    )
+    Copy-Item -LiteralPath $validIcon -Destination $unrelatedGeneratedResource
     $refreshOrder = New-Object System.Collections.Generic.List[string]
     $refreshBoundary = {
         param($ChangedFolder, $DesktopIniChange)
@@ -393,6 +404,7 @@ try {
         -RefreshAction $refreshBoundary
     Assert-Equal 'Create' $refreshOrder[0] 'initial apply refresh follows completed desktop.ini creation'
     Assert-Equal $true $firstRefreshApply.RefreshSucceeded 'initial apply reports successful refresh boundary'
+    $firstAppliedResource = $firstRefreshApply.IconResource
     Assert-True (([IO.File]::GetAttributes($specialFolder) -band [IO.FileAttributes]::NotContentIndexed) -ne 0) 'apply preserves unrelated folder attributes'
     $specialIni = Join-Path $specialFolder 'desktop.ini'
     [IO.File]::SetAttributes(
@@ -416,9 +428,18 @@ try {
     }
     Assert-Equal 'Update' $refreshOrder[1] 'different-icon apply refreshes an existing customization'
     Assert-Equal $true $secondRefreshApply.Applied 'existing desktop.ini is updated without replacing its open file identity'
+    Assert-True (-not $secondRefreshApply.IconResource.Equals(
+        $firstAppliedResource,
+        [StringComparison]::OrdinalIgnoreCase
+    )) 'different-icon apply receives a new resource identity'
+    Assert-Equal $false (Test-Path -LiteralPath $firstAppliedResource) 'superseded generated resource is removed safely'
+    Assert-True (Test-Path -LiteralPath $unrelatedGeneratedResource) 'generated-resource cleanup preserves unrelated folder resources'
     Assert-True (([IO.File]::ReadAllText((Join-Path $specialFolder 'desktop.ini'))).Contains(
-        ([string]$installedManifest.entries[1].hash + '.ico,0')
-    )) 'different-icon apply commits the new cached icon before refresh'
+        ($secondRefreshApply.IconResource + ',0')
+    )) 'different-icon apply commits the new versioned resource before refresh'
+    Assert-Equal ([string]$installedManifest.entries[1].hash) `
+        (Get-PfiSha256 $secondRefreshApply.IconResource) `
+        'different-icon generated resource contains the requested ICO'
     Assert-True (([IO.File]::GetAttributes($specialIni) -band [IO.FileAttributes]::NotContentIndexed) -ne 0) 'different-icon apply preserves unrelated desktop.ini attributes'
 
     $notificationLog = New-Object System.Collections.Generic.List[object]
@@ -449,11 +470,12 @@ try {
     Assert-Equal ([IO.Path]::GetFullPath($specialFolder).TrimEnd('\')) $notificationLog[1].Path 'refresh targets customized folder attributes'
     Assert-Equal ([IO.Path]::GetFullPath((Split-Path -Parent $specialFolder)).TrimEnd('\')) $notificationLog[3].Path 'refresh targets parent directory'
     Assert-Equal $true $matchingWindow.Navigated 'Explorer view displaying parent is fully reloaded'
-    Assert-Equal $matchingWindow.LocationURL $matchingWindow.NavigatedUrl 'full reload retains the parent location'
+    Assert-Equal 2 $matchingWindow.NavigationHistory.Count 'full reload navigates the matched tab away and back'
+    Assert-Equal $matchingWindow.LocationURL $matchingWindow.NavigatedUrl 'full reload returns to the parent location'
     Assert-Equal $false $otherWindow.Navigated 'Explorer view displaying customized folder is not reloaded'
     Assert-Equal 1 $refreshResult.MatchedExplorerWindows 'only the parent Explorer view is selected'
     Assert-Equal 101 $refreshResult.RefreshedWindowHandles[0] 'refresh result identifies the exact matched Explorer window'
-    Assert-Equal 'Navigate2CurrentLocation' $refreshResult.ViewRefreshMechanism 'refresh uses targeted current-location navigation'
+    Assert-Equal 'NavigateAwayAndBack' $refreshResult.ViewRefreshMechanism 'refresh uses targeted away-and-back navigation'
     [PortableFolderIcons.NativeMethods]::ValidatePidl($specialFolder)
     Assert-Equal 0 ([PortableFolderIcons.NativeMethods]::OutstandingPidls) 'canonical PIDL allocation is released'
 
@@ -477,8 +499,10 @@ try {
         Assert-Equal $false (Test-Path -LiteralPath (Join-Path $ChangedFolder 'desktop.ini')) 'reset deletes owned-only desktop.ini before refresh'
         return [pscustomobject]@{ RefreshSucceeded = $true }
     }
-    [void](Invoke-PfiReset -TargetPath @($specialFolder) -RefreshAction $resetRefreshBoundary)
+    [void](Invoke-PfiReset -TargetPath @($specialFolder) -InstallRoot $installRoot `
+        -RefreshAction $resetRefreshBoundary)
     Assert-Equal 'Delete' $resetRefreshChanges[0] 'reset uses equivalent deleted-desktop.ini refresh handling'
+    Assert-Equal $false (Test-Path -LiteralPath $secondRefreshApply.IconResource) 'reset removes the selected folder owned generated resource'
     $notificationLog.Clear()
     [void](Send-PfiExplorerRefresh -FolderPath $specialFolder -DesktopIniChange Delete `
         -NotificationAction $notificationBoundary -ExplorerWindowsProvider { @() })
@@ -489,25 +513,29 @@ try {
         -IconHash $installedManifest.entries[3].hash -InstallRoot $installRoot `
         -RefreshAction $refreshBoundary
     Assert-True (([IO.File]::ReadAllText($specialIni)).Contains(
-        ([string]$installedManifest.entries[3].hash + '.ico,0')
+        ($postResetApply.IconResource + ',0')
     )) 'Apply A then Reset then Apply B stores B as current state'
+    Assert-Equal ([string]$installedManifest.entries[3].hash) `
+        (Get-PfiSha256 $postResetApply.IconResource) `
+        'post-reset Apply resource contains B'
     $rapidFinalApply = Invoke-PfiApply -TargetPath @($specialFolder) `
         -IconHash $installedManifest.entries[4].hash -InstallRoot $installRoot `
         -RefreshAction $refreshBoundary
     Assert-True (([IO.File]::ReadAllText($specialIni)).Contains(
-        ([string]$installedManifest.entries[4].hash + '.ico,0')
+        ($rapidFinalApply.IconResource + ',0')
     )) 'multiple rapid colors leave the final requested icon current'
     $finalExpectedHash = [string]$installedManifest.entries[4].hash
-    $finalCachedPath = Join-Path (Join-Path $installRoot 'icons') `
-        $installedManifest.entries[4].cachedFilename
-    Assert-Equal $finalExpectedHash (Get-PfiSha256 $finalCachedPath) `
-        'final rapid color references cache content with the requested hash'
+    Assert-Equal $finalExpectedHash (Get-PfiSha256 $rapidFinalApply.IconResource) `
+        'final rapid color resource contains cache content with the requested hash'
     Assert-Equal $true ($postResetApply.Applied -and $rapidFinalApply.Applied) 'post-reset and rapid sequential applies complete'
 
     $dispatcherText = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\Windows\Invoke-PortableFolderIcons.ps1') -Raw
     Assert-True ($dispatcherText.IndexOf('$actionResult = Invoke-PfiApply') -lt
         $dispatcherText.IndexOf('[void][Windows.MessageBox]::Show(')) 'success dialog is ordered after Apply and refresh completion'
     Assert-True ($dispatcherText.Contains('but Explorer could not be refreshed automatically')) 'dispatcher distinguishes refresh warning from apply failure'
+    $integrationText = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Integration.ps1') -Raw
+    Assert-True ($integrationText.Contains("if (`$Action -notin @('Apply', 'Reset'))")) `
+        'Apply and Reset commands keep a visible progress terminal'
 
     $emptyFolder = Join-Path $testRoot 'Empty Reset'
     [void](New-Item -ItemType Directory -Path $emptyFolder)

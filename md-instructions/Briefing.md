@@ -23,7 +23,9 @@ The root batch launcher invokes the repository installer beneath
 a manifest, and registers a tool-owned HKCU cascading menu. Installed actions
 apply or reset only folder-icon fields in `desktop.ini`, repair the installed
 integration without the repository, or uninstall while preserving cached
-icons by default.
+icons by default. Each Apply copies the selected hash-validated ICO to a
+unique, folder-scoped resource filename so the Shell cannot reuse the prior
+rendered-resource identity.
 
 ## Features
 
@@ -32,8 +34,9 @@ icons by default.
 - A single-selection **Folder Icons** classic submenu with Apply, Reset,
   Repair, and Uninstall actions.
 - Repository-independent installed runtime and repair operation.
-- Targeted Shell notification and Explorer-window refresh without restarting
-  Explorer or clearing the global icon cache.
+- Targeted Shell notification followed by completed away-and-back navigation
+  of only the matching parent Explorer tab, without restarting Explorer or
+  clearing the global icon cache.
 - Pure PowerShell verification with no admin, Python, package, or network
   dependency.
 

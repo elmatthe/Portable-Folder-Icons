@@ -5,6 +5,29 @@ entries appear first.
 
 ---
 
+## 009 — Version applied icon resources and fully reload one parent tab — 2026-07-28 — Codex
+
+**Status:** Accepted; supersedes #004 for Apply/Reset repaint behavior
+**Context:** Three manual tests proved that path/PIDL notifications, ordinary
+refresh, and same-location navigation left a customized folder bound to a
+stale system image-list entry. Reset was immediate because it left the
+customized-folder state. A unique ICO filename alone and targeted
+`SHUpdateImage` also failed to change the stale entry.
+**Decision:** Give every Apply a unique resource beneath
+`icons\applied`, remove only superseded resources whose filename prefix matches
+the selected folder's canonical-path hash, then navigate the one matching
+Shell tab to its parent and back. Detect both completed navigations from that
+automation object's canonical filesystem location and Busy state, without a
+fixed sleep. Keep Apply/Reset terminals visible for progress and warnings.
+**Alternatives considered:** More item notifications, `SHUpdateImage`, a
+global association/cache refresh, Explorer restart, and arbitrary delays were
+ineffective or too disruptive.
+**Consequences:** The matching tab remains open and returns to its original
+folder, but selection, scroll position, and navigation history may change.
+Generated resources add a bounded current resource per actively customized
+folder; setup/uninstall cache-preservation rules continue to protect applied
+folders.
+
 ## 008 — Correct icon-source directory capitalization — 2026-07-28 — Codex
 
 **Status:** Accepted; supersedes #001 only for path capitalization

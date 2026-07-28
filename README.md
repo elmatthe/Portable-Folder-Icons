@@ -38,10 +38,10 @@ Rerunning the batch is a safe install/update/repair/rescan operation.
 2. On Windows 11, choose **Show more options**.
 3. Open **Folder Icons** and choose an icon.
 
-The folder should update promptly without closing Explorer. Windows icon
-caching varies; if the old image remains, navigate away and back or reopen
-that one parent window. The tool never restarts Explorer or globally rebuilds
-the icon cache.
+Apply and Reset show a short progress terminal while the customization is
+committed and the matching parent Explorer view is reloaded. That view returns
+to the same folder automatically; its selection and scroll position may reset.
+The tool never restarts Explorer or globally rebuilds the icon cache.
 
 The submenu also includes:
 
@@ -76,9 +76,9 @@ cache, so previously customized folders keep their icon.
   application folders, and locations you cannot write are rejected.
 - The menu is in the classic context menu, not Windows 11's first compact
   menu.
-- Explorer may occasionally retain a stale visual until you navigate away and
-  back. Open Explorer windows stay open at their existing locations, but
-  selection and scroll position are not guaranteed.
+- The matching parent view is navigated out and back automatically to force a
+  full reload. Its window and final location are preserved, but selection,
+  scroll position, and Back history are not guaranteed.
 
 ## Troubleshooting
 
@@ -90,7 +90,9 @@ cache, so previously customized folders keep their icon.
   report, then rerun repository setup if source icons need to be reimported.
 - **Access denied/protected folder:** choose a normal folder you own. Do not
   elevate the launcher.
-- **Icon looks stale:** navigate away and back in the affected parent window.
+- **Apply reports that refresh failed:** the customization was saved, but the
+  targeted Explorer reload did not complete. Reopen that parent location and
+  report the warning text.
 
 ## License and icon rights
 
