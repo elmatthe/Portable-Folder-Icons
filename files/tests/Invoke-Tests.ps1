@@ -116,6 +116,20 @@ try {
     Assert-Equal $false ($reset.Contains('IconResource=')) 'reset removes owned icon key'
     Assert-Equal '' (Reset-PfiDesktopIniIconContent "[.ShellClassInfo]`r`nIconResource=x,0`r`n") 'reset removes empty shell section'
     Assert-Equal $reset (Reset-PfiDesktopIniIconContent $reset) 'reset is idempotent'
+
+    $installRoot = Join-Path $testRoot 'stable install ünicode'
+    $installer = Join-Path $repoRoot 'scripts\Windows\Install-PortableFolderIcons.ps1'
+    $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    & $windowsPowerShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $installer `
+        -RepositoryRoot $repoRoot -InstallRoot $installRoot -SkipRegistry *> $null
+    Assert-Equal 0 $LASTEXITCODE 'installer succeeds in path with spaces and Unicode'
+    $installedManifest = Read-PfiManifest (Join-Path $installRoot 'manifest.json')
+    Assert-Equal 10 @($installedManifest.entries | Where-Object validationState -eq 'Accepted').Count 'installer imports ten valid ICOs'
+    $cachedBefore = @(Get-ChildItem -LiteralPath (Join-Path $installRoot 'icons') -Filter '*.ico').Count
+    & $windowsPowerShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $installer `
+        -RepositoryRoot $repoRoot -InstallRoot $installRoot -SkipRegistry *> $null
+    Assert-Equal 0 $LASTEXITCODE 'installer rerun is idempotent'
+    Assert-Equal $cachedBefore @(Get-ChildItem -LiteralPath (Join-Path $installRoot 'icons') -Filter '*.ico').Count 'installer preserves hash cache on rerun'
 }
 finally {
     if (Test-Path -LiteralPath $testRoot) {

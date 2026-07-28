@@ -9,6 +9,9 @@
 - Added pure PowerShell core functions and deterministic tests for labels, ICO
   validation, hashing/cache plans, manifests, cleanup guards, selection
   validation, and loss-minimizing `desktop.ini` transforms.
+- Added the Windows PowerShell 5.1 setup launcher and staged LocalAppData
+  runtime installer with validated icon rescan, atomic manifest writes,
+  content-hash cache reuse, and readable results/totals.
 
 ### Changed
 
