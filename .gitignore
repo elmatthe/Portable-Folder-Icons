@@ -1,0 +1,51 @@
+# Workspace + agent + editor config (local by design)
+AI-WORKSPACE.md
+.claude/
+.codex/
+.vscode/
+
+# Standalone workspace utilities
+Map-Repo-Structure.bat
+Windows-System-Scan-Markdown.bat
+MacOS-System-Scan-Markdown.command
+
+# Secrets / environment
+.env
+.env.*
+*.key
+*.pem
+
+# Python scaffold/runtime artifacts (not used by this project)
+.venv/
+venv/
+env/
+.python_runtime/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+*.spec
+
+# Test/tool caches and development-only output
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+files/bin/
+files/backups/
+files/logs/
+files/test-logs/
+files/temp/
+files/output/
+*.log
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+*.swp

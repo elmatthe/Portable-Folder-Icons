@@ -1,0 +1,67 @@
+# ============================================================================
+#  .gitignore  --  template
+# ----------------------------------------------------------------------------
+#  Drop this into a repo ROOT and rename it to ".gitignore".
+#  (Git only reads a file literally named ".gitignore", not ".gitignore-template".)
+#
+#  NOTE ON AGENT CONFIG + WORKSPACE FILES:
+#  Per my setup, .claude/, .codex/, .vscode/, and AI-WORKSPACE.md are gitignored on
+#  purpose -- they are copied into each repo per-machine by the scaffolder, not
+#  synced through git. Consequence: a fresh "git clone" alone will NOT include
+#  agent config, editor config, or workspace rules until those files are present
+#  locally. That's intended; just don't expect a bare clone to carry them.
+# ============================================================================
+
+# --- Workspace + agent + editor config (kept out of git on purpose) ---------
+AI-WORKSPACE.md
+.claude/
+.codex/
+.vscode/
+
+# --- Standalone workspace utilities (copied per-machine, not synced) ---------
+Map-Repo-Structure.bat
+Windows-System-Scan-Markdown.bat
+MacOS-System-Scan-Markdown.command
+
+# --- Secrets / environment --------------------------------------------------
+.env
+.env.*
+*.key
+*.pem
+
+# --- Python virtual environments + runtimes ---------------------------------
+.venv/
+venv/
+env/
+.python_runtime/
+
+# --- Python build / cache artifacts -----------------------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+*.spec
+
+# --- Test / tooling caches --------------------------------------------------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- In-repo binaries + dev-only logs/scratch (per AI-WORKSPACE.md) ---------
+files/bin/
+files/logs/
+files/test-logs/
+files/temp/
+files/output/
+
+# --- OS / editor cruft ------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+*.swp

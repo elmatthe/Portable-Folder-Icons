@@ -1,0 +1,37 @@
+# ============================================================================
+#  .gitattributes  --  template
+# ----------------------------------------------------------------------------
+#  Drop this into a repo ROOT and rename it to ".gitattributes".
+#  Normalizes line endings so the same repo works on Windows + macOS:
+#  .bat stays CRLF (cmd requires it), shell/.command and .py stay LF.
+# ============================================================================
+
+# --- Default: normalize everything git detects as text -----------------------
+* text=auto
+
+# --- Explicit line endings ----------------------------------------------------
+*.bat text eol=crlf
+*.command text eol=lf
+*.py text eol=lf
+
+# --- Binaries (never normalize, never diff as text) ---------------------------
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.7z binary
+*.exe binary
+*.dll binary
+*.pyd binary
+*.so binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.mp3 binary
+*.wav binary
+*.mp4 binary
+*.xlsx binary
+*.docx binary
