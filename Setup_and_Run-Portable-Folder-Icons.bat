@@ -7,8 +7,6 @@ echo ============================================================
 echo   Portable Folder Icons v0.1.0 - Setup / Repair / Rescan
 echo ============================================================
 echo.
-echo   Repository: %CD%
-echo.
 echo   Python and a virtual environment are not required.
 echo   This tool uses the Windows PowerShell included with Windows.
 echo   It installs only for the current user and never needs admin.
@@ -54,8 +52,7 @@ if not "%CHECK_RESULT%"=="0" (
 
 set "INSTALLER=%~dp0scripts\Windows\Install-PortableFolderIcons.ps1"
 if not exist "%INSTALLER%" (
-    echo ERROR: Installer script is missing:
-    echo   %INSTALLER%
+    echo ERROR: The repository installer script is missing.
     set "RESULT=16"
     goto :finish
 )

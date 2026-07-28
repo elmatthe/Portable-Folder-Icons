@@ -30,3 +30,15 @@
   Windows-only pure-PowerShell project.
 - Hardened staged updates to restore the prior runtime, manifest, and menu when
   activation or registration fails.
+
+### Fixed
+
+- Prevented batch metacharacters in checkout paths from being reinterpreted
+  through dynamic `echo` output.
+- Removed now-empty `.ShellClassInfo` sections correctly when another INI
+  section follows, and reject duplicate shell sections rather than partially
+  editing ambiguous data.
+- Made hash-filename cache conflicts fail setup without replacing the active
+  manifest/menu.
+- Added whole-operation Apply/Reset rollback and cleanup of newly created
+  partial `desktop.ini` files after a write/attribute failure.

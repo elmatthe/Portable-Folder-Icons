@@ -35,9 +35,17 @@ function Assert-PfiDesktopIniWellFormed {
     if ($Content.Contains([char]0)) {
         throw 'The existing desktop.ini contains invalid NUL data.'
     }
+    $sections = @{}
     foreach ($line in [regex]::Split($Content, '\r\n|\n|\r')) {
         if ($line.TrimStart().StartsWith('[') -and $line.Trim() -notmatch '^\[[^\[\]]+\]$') {
             throw 'The existing desktop.ini contains a malformed section header.'
+        }
+        if ($line.Trim() -match '^\[([^\[\]]+)\]$') {
+            $sectionName = $Matches[1].ToUpperInvariant()
+            if ($sections.ContainsKey($sectionName)) {
+                throw "The existing desktop.ini contains a duplicate [$($Matches[1])] section."
+            }
+            $sections[$sectionName] = $true
         }
     }
 }
@@ -92,6 +100,10 @@ function Write-PfiDesktopIniSafely {
             if ($null -ne $originalAttributes) {
                 Set-PfiFileAttributes $iniPath $originalAttributes
             }
+        }
+        elseif (-not $existing -and (Test-Path -LiteralPath $iniPath -PathType Leaf)) {
+            Set-PfiFileAttributes $iniPath ([IO.FileAttributes]::Normal)
+            Remove-Item -LiteralPath $iniPath -Force
         }
         throw
     }
@@ -188,12 +200,31 @@ function Invoke-PfiApply {
     if ((Get-PfiSha256 $cachedPath) -ne $hash) {
         throw 'The cached icon failed its SHA-256 integrity check.'
     }
+    $iniPath = Join-Path $folder 'desktop.ini'
+    $iniExisted = Test-Path -LiteralPath $iniPath -PathType Leaf
+    $originalIniAttributes = if ($iniExisted) { [IO.File]::GetAttributes($iniPath) } else { $null }
+    $originalFolderAttributes = [IO.File]::GetAttributes($folder)
     $existing = Get-PfiExistingDesktopIni $folder
     Assert-PfiDesktopIniWellFormed $existing
     $updated = Set-PfiDesktopIniIconContent $existing ($cachedPath + ',0')
-    [void](Write-PfiDesktopIniSafely $folder $updated)
-    $folderAttributes = [IO.File]::GetAttributes($folder)
-    Set-PfiFileAttributes $folder ($folderAttributes -bor [IO.FileAttributes]::ReadOnly)
+    try {
+        [void](Write-PfiDesktopIniSafely $folder $updated)
+        Set-PfiFileAttributes $folder ($originalFolderAttributes -bor [IO.FileAttributes]::ReadOnly)
+    }
+    catch {
+        try {
+            if ($iniExisted) {
+                [void](Write-PfiDesktopIniSafely $folder $existing)
+                Set-PfiFileAttributes $iniPath $originalIniAttributes
+            }
+            else {
+                [void](Write-PfiDesktopIniSafely $folder '' -DeleteWhenEmpty)
+            }
+            Set-PfiFileAttributes $folder $originalFolderAttributes
+        }
+        catch { Write-Warning 'Apply failed and the original folder state could not be fully restored.' }
+        throw
+    }
     if (-not $SkipRefresh) { Send-PfiExplorerRefresh $folder }
     return [pscustomobject]@{ Action = 'Apply'; Folder = $folder; IconHash = $hash }
 }
@@ -206,13 +237,29 @@ function Invoke-PfiReset {
     )
 
     $folder = Assert-PfiCustomizableFolder $TargetPath
+    $iniPath = Join-Path $folder 'desktop.ini'
+    $iniExisted = Test-Path -LiteralPath $iniPath -PathType Leaf
+    $originalIniAttributes = if ($iniExisted) { [IO.File]::GetAttributes($iniPath) } else { $null }
+    $originalFolderAttributes = [IO.File]::GetAttributes($folder)
     $existing = Get-PfiExistingDesktopIni $folder
     Assert-PfiDesktopIniWellFormed $existing
     $updated = Reset-PfiDesktopIniIconContent $existing
-    [void](Write-PfiDesktopIniSafely $folder $updated -DeleteWhenEmpty)
-    if ([string]::IsNullOrEmpty($updated)) {
-        $folderAttributes = [IO.File]::GetAttributes($folder)
-        Set-PfiFileAttributes $folder ($folderAttributes -band (-bnot [IO.FileAttributes]::ReadOnly))
+    try {
+        [void](Write-PfiDesktopIniSafely $folder $updated -DeleteWhenEmpty)
+        if ([string]::IsNullOrEmpty($updated)) {
+            Set-PfiFileAttributes $folder ($originalFolderAttributes -band (-bnot [IO.FileAttributes]::ReadOnly))
+        }
+    }
+    catch {
+        try {
+            if ($iniExisted) {
+                [void](Write-PfiDesktopIniSafely $folder $existing)
+                Set-PfiFileAttributes $iniPath $originalIniAttributes
+            }
+            Set-PfiFileAttributes $folder $originalFolderAttributes
+        }
+        catch { Write-Warning 'Reset failed and the original folder state could not be fully restored.' }
+        throw
     }
     if (-not $SkipRefresh) { Send-PfiExplorerRefresh $folder }
     return [pscustomobject]@{ Action = 'Reset'; Folder = $folder }

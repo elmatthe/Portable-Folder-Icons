@@ -50,6 +50,6 @@ v0.1.0
 
 ## High-Level State
 
-The v0.1.0 feature set is implemented through Phase 5. Automated verification
-is green; the systematic bug hunt and user-run Explorer acceptance pass remain
-before approval to merge. See `Handoff.md` for live details.
+The v0.1.0 implementation and systematic bug hunt are complete. Automated
+verification is green; the user-run Explorer acceptance pass and explicit
+merge approval remain. See `Handoff.md` for live details.

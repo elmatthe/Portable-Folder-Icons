@@ -66,9 +66,7 @@ $stageRuntime = Join-Path $stageRoot 'runtime'
 $oldRuntime = Join-Path $InstallRoot ('.runtime-old-' + [guid]::NewGuid().ToString('N'))
 $oldManifest = Join-Path $InstallRoot ('.manifest-old-' + [guid]::NewGuid().ToString('N') + '.json')
 $runtimeMoved = $false
-$runtimeActivated = $false
 $manifestMoved = $false
-$manifestActivated = $false
 $previousManifest = $null
 
 try {
@@ -98,7 +96,8 @@ try {
             throw "The staged runtime is incomplete: $requiredName is missing."
         }
     }
-    foreach ($source in $runtimeSources) {
+    foreach ($requiredName in $requiredRuntime) {
+        $source = $runtimeSources | Where-Object Name -eq $requiredName | Select-Object -First 1
         Copy-Item -LiteralPath $source.FullName -Destination (Join-Path $stageRuntime $source.Name)
     }
     foreach ($scriptFile in @(Get-ChildItem -LiteralPath $stageRuntime -Filter '*.ps1' -File)) {
@@ -115,6 +114,10 @@ try {
     }
 
     $inventory = @(Get-PfiIconInventory -SourceDirectory $sourceIcons -CacheDirectory $iconsPath)
+    $cacheConflicts = @($inventory | Where-Object CacheAction -eq 'RejectCacheConflict')
+    if ($cacheConflicts.Count -gt 0) {
+        throw ('The stable icon cache contains {0} hash-filename conflict(s); the previous runtime and menu were preserved.' -f $cacheConflicts.Count)
+    }
     foreach ($entry in @($inventory | Where-Object {
         $_.Status -eq 'Accepted' -and $_.CacheAction -eq 'Copy'
     })) {
@@ -143,9 +146,7 @@ try {
         $manifestMoved = $true
     }
     Move-Item -LiteralPath $stageRuntime -Destination $runtimePath
-    $runtimeActivated = $true
     Move-Item -LiteralPath $stagedManifest -Destination $manifestPath
-    $manifestActivated = $true
 
     if (-not $SkipRegistry) {
         [void](Register-PfiContextMenu -Manifest (Read-PfiManifest $manifestPath) -InstallRoot $InstallRoot)

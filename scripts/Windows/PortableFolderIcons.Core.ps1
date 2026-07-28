@@ -343,8 +343,11 @@ function Reset-PfiDesktopIniIconContent {
         for ($index = $sectionStart + 1; $index -lt $lines.Count; $index++) {
             if ($lines[$index].Trim() -match '^\[.+\]$') { $nextSection = $index; break }
         }
-        $meaningful = @($lines[($sectionStart + 1)..([Math]::Max($sectionStart + 1, $nextSection - 1))] |
-            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $meaningful = @()
+        if ($nextSection -gt ($sectionStart + 1)) {
+            $meaningful = @($lines[($sectionStart + 1)..($nextSection - 1)] |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        }
         if ($meaningful.Count -eq 0) {
             $removeCount = $nextSection - $sectionStart
             $lines.RemoveRange($sectionStart, $removeCount)

@@ -144,6 +144,13 @@ $shippedFiles += Get-Item -LiteralPath (Join-Path $repoRoot 'Setup_and_Run-Porta
 $shippedText = ($shippedFiles | ForEach-Object {
     Get-Content -LiteralPath $_.FullName -Raw
 }) -join "`n"
+$batchText = Get-Content -LiteralPath (Join-Path $repoRoot 'Setup_and_Run-Portable-Folder-Icons.bat') -Raw
+if ($batchText -match '(?im)^\s*echo[^\r\n]*(%CD%|%INSTALLER%)') {
+    Add-CheckFailure 'batch echoes an untrusted dynamic path through cmd parsing'
+}
+else {
+    Add-CheckPass 'batch does not echo untrusted dynamic paths'
+}
 $forbiddenPatterns = [ordered]@{
     'hardcoded user checkout path' = 'C:\\Users\\ematthew'
     'HKLM registry write/reference' = '(?i)\bHKLM(?::|\\)'

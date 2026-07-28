@@ -2,8 +2,9 @@
 
 ## Current Focus
 
-Phases 0–5 are complete and verified. Phase 6 systematic bug hunt and
-manual-test handoff is next on the working branch.
+All implementation phases and the bug hunt are complete and verified on
+`feature/v0.1.0-portable-folder-icons`. Waiting for user-run Explorer
+acceptance tests and explicit merge approval.
 
 ---
 
@@ -11,12 +12,21 @@ manual-test handoff is next on the working branch.
 
 | # | Severity | File | Description | Status | Found by |
 |---|----------|------|-------------|--------|----------|
-| — | — | — | No implementation issues recorded yet. | — | — |
+| 1 | Minor | Explorer UI | Windows may retain a stale folder image until navigating away/back despite targeted notification; documented and pending manual characterization. | Documented / manual QA | Codex |
+| 2 | Suggestion | Selection | Multi-folder apply needs safe multi-path transport and partial-failure UX. | Deferred beyond v0.1.0 per plan | User / Codex |
 
 ---
 
 ## Work Log (newest first)
 
+- 2026-07-28 — Phase 6 systematic bug hunt completed across every shipped
+  batch/PowerShell script. Fixed unsafe batch dynamic-path echoing, adjacent
+  empty INI-section cleanup, duplicate shell-section ambiguity, cache-conflict
+  activation, and whole-operation Apply/Reset recovery; added regression
+  assertions for each. The ignored manual checklist is at
+  `files/test-logs/v0.1.0_pre-release.md`. Final gate: 73 assertions plus all
+  structural/security/documentation checks pass under Windows PowerShell 5.1.
+  No unresolved critical issue; user-only Explorer tests remain. — Codex
 - 2026-07-28 — Phase 5 checkpoint passed under Windows PowerShell 5.1. Added
   installed runtime/cache integrity Repair, exact-scope confirmed Uninstall,
   default cache preservation, separately warned purge, post-exit cleanup,
@@ -69,6 +79,15 @@ manual-test handoff is next on the working branch.
 ---
 
 ## Session Sync Log (newest first)
+
+### 2026-07-28 — Machine: G6-PF5DSHVY — pushed with Phase 6 checkpoint
+
+- Changed: batch launcher, installer, core, actions, tests, and verify gate for
+  five bug-hunt regression fixes.
+- Changed: Briefing, Changelog, and Handoff for final pre-release state.
+- Local ignored: `files/test-logs/v0.1.0_pre-release.md` manual QA checklist.
+- Note: the temporary implementation plan remains intentionally committed;
+  do not delete or merge until manual approval.
 
 ### 2026-07-28 — Machine: G6-PF5DSHVY — pushed with Phase 5 checkpoint
 

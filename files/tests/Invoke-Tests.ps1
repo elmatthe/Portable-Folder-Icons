@@ -118,6 +118,9 @@ try {
     Assert-True ($reset.Contains('[ViewState]')) 'reset preserves unrelated section'
     Assert-Equal $false ($reset.Contains('IconResource=')) 'reset removes owned icon key'
     Assert-Equal '' (Reset-PfiDesktopIniIconContent "[.ShellClassInfo]`r`nIconResource=x,0`r`n") 'reset removes empty shell section'
+    Assert-Equal "[ViewState]`r`nFolderType=Generic`r`n" (
+        Reset-PfiDesktopIniIconContent "[.ShellClassInfo]`r`nIconResource=x,0`r`n[ViewState]`r`nFolderType=Generic`r`n"
+    ) 'reset removes empty shell section before another section'
     Assert-Equal $reset (Reset-PfiDesktopIniIconContent $reset) 'reset is idempotent'
 
     $installRoot = Join-Path $testRoot 'stable install ünicode'
@@ -212,6 +215,7 @@ try {
     Assert-Equal 10 $repairResult.ValidatedIcons 'repair validates all installed cached icons'
     Assert-Equal $false $repairResult.ImportedRepositoryIcons 'repair never claims repository import'
 
+    $manifestBeforeConflict = [IO.File]::ReadAllText((Join-Path $installRoot 'manifest.json'))
     $corruptCachePath = Join-Path (Join-Path $installRoot 'icons') $actionEntry.cachedFilename
     [IO.File]::WriteAllText($corruptCachePath, 'corrupt')
     $integrityFolder = Join-Path $testRoot 'Integrity Target'
@@ -222,6 +226,24 @@ try {
     } 'apply rejects cached ICO with wrong hash'
     Assert-Equal $false (Test-Path -LiteralPath (Join-Path $integrityFolder 'desktop.ini')) 'hash failure leaves target unchanged'
     Assert-Throws { Invoke-PfiRepair -InstallRoot $installRoot -SkipRegistry } 'repair reports corrupt installed cache'
+    $savedPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & $windowsPowerShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $installer `
+        -RepositoryRoot $repoRoot -InstallRoot $installRoot -SkipRegistry *> $null
+    $conflictExit = $LASTEXITCODE
+    $ErrorActionPreference = $savedPreference
+    Assert-True ($conflictExit -ne 0) 'setup fails safely on hash-filename cache conflict'
+    Assert-Equal $manifestBeforeConflict ([IO.File]::ReadAllText((Join-Path $installRoot 'manifest.json'))) 'cache conflict preserves active manifest'
+
+    $duplicateIniFolder = Join-Path $testRoot 'Duplicate Shell Sections'
+    [void](New-Item -ItemType Directory -Path $duplicateIniFolder)
+    [IO.File]::WriteAllText(
+        (Join-Path $duplicateIniFolder 'desktop.ini'),
+        "[.ShellClassInfo]`r`nInfoTip=One`r`n[.shellclassinfo]`r`nInfoTip=Two`r`n"
+    )
+    Assert-Throws {
+        Invoke-PfiReset -TargetPath @($duplicateIniFolder) -SkipRefresh
+    } 'reset rejects duplicate shell sections instead of partially editing'
 
     # Recreate a clean cache in a second test-owned root for uninstall behavior.
     $uninstallRoot = Join-Path $testRoot 'stable install ünicode'
