@@ -33,6 +33,12 @@
 
 ### Fixed
 
+- Repaired the classic Explorer cascade by replacing the malformed
+  `ExtendedSubCommandsKey` child tree with the required REG_SZ reference to a
+  separate current-user Classes submenu store. Setup, Repair, and Uninstall
+  now remove only exactly recognized legacy `FolderColor_<Color>` prototype
+  verbs while preserving unrelated context-menu integrations, and notify the
+  Shell of association changes without restarting Explorer.
 - Corrected the batch-to-PowerShell repository-root argument boundary so a
   trailing backslash cannot escape the closing quote and append an illegal
   quote character before `GetFullPath`; checkout paths containing spaces and

@@ -3,10 +3,10 @@
 ## Current Focus
 
 All implementation phases and the bug hunt are complete on
-`feature/v0.1.0-portable-folder-icons`. The Step 1 launcher defect reported
-during manual acceptance testing is fixed and verified automatically; waiting
-for the user to rerun Step 1, complete the remaining Explorer acceptance
-tests, and explicitly approve the merge.
+`feature/v0.1.0-portable-folder-icons`. Two release-blocking defects found
+during manual acceptance testing are repaired and verified automatically.
+Waiting for the user to retest setup and the classic Explorer cascade before
+continuing the remaining acceptance tests or considering a merge.
 
 ---
 
@@ -14,14 +14,38 @@ tests, and explicitly approve the merge.
 
 | # | Severity | File | Description | Status | Found by |
 |---|----------|------|-------------|--------|----------|
-| 1 | Critical | `Setup_and_Run-Portable-Folder-Icons.bat` | Passing the trailing-backslash checkout root as `"%~dp0"` caused native PowerShell argument parsing to retain a closing quote in the value sent to `GetFullPath`. | Fixed / awaiting user Step 1 retest | User |
-| 2 | Minor | Explorer UI | Windows may retain a stale folder image until navigating away/back despite targeted notification; documented and pending manual characterization. | Documented / manual QA | Codex |
-| 3 | Suggestion | Selection | Multi-folder apply needs safe multi-path transport and partial-failure UX. | Deferred beyond v0.1.0 per plan | User / Codex |
+| 1 | Critical | Registry integration | The parent stored `ExtendedSubCommandsKey` as a child key instead of a REG_SZ reference, so Explorer treated **Folder Icons** as a plain executable verb; setup also left ten recognized prototype `FolderColor_*` verbs in place. | Fixed / awaiting user Explorer retest | User |
+| 2 | Critical | `Setup_and_Run-Portable-Folder-Icons.bat` | Passing the trailing-backslash checkout root as `"%~dp0"` caused native PowerShell argument parsing to retain a closing quote in the value sent to `GetFullPath`. | Fixed / awaiting user Step 1 retest | User |
+| 3 | Minor | Explorer UI | Windows may retain a stale folder image until navigating away/back despite targeted notification; documented and pending manual characterization. | Documented / manual QA | Codex |
+| 4 | Suggestion | Selection | Multi-folder apply needs safe multi-path transport and partial-failure UX. | Deferred beyond v0.1.0 per plan | User / Codex |
 
 ---
 
 ## Work Log (newest first)
 
+- 2026-07-28 — Diagnosed the second manual acceptance failure from the exact
+  live HKCU state. The parent
+  `HKCU\Software\Classes\Directory\shell\PortableFolderIcons` had MUIVerb,
+  Icon, and MultiSelectModel but no cascade-signaling value; instead, the
+  implementation incorrectly created a literal
+  `PortableFolderIcons\ExtendedSubCommandsKey\shell` child tree. Explorer
+  therefore exposed the parent as a plain verb with no command handler and
+  attempted ordinary activation against the selected folder, producing the
+  file-association error. Ten older `FolderColor_<Color>` prototype verbs also
+  remained at the Directory shell level. Corrected the parent to a REG_SZ
+  `ExtendedSubCommandsKey=PortableFolderIcons.ContextMenu` reference and moved
+  all 13 verbs to the separate current-user Classes store
+  `HKCU\Software\Classes\PortableFolderIcons.ContextMenu\shell`. Setup, Repair,
+  and Uninstall now remove only the ten allowlisted legacy color keys when
+  their exact `Color: <Color>`, `SetFolderColor.ps1`, `-folderPath "%1"`, and
+  matching `Folder_<Color>.ico,0` markers agree. Isolated HKCU tests prove
+  cascade shape, commands/quoting, idempotence, stale-icon removal, uninstall,
+  and preservation of unrelated and lookalike keys. The full suite has 101
+  passing assertions. Normal setup repaired the live menu without elevation;
+  registry inspection confirms ten icon verbs, three utility verbs, no parent
+  command, no obsolete cascade child, and no recognized legacy keys. A Shell
+  association-change notification was sent without restarting Explorer.
+  Manual Explorer retest remains required. — Codex
 - 2026-07-28 — Diagnosed the manual Step 1 failure at the native
   batch-to-PowerShell boundary. `%~dp0` ends in `\`; enclosing that value
   directly in quotes caused the closing quote to reach PowerShell as a literal
@@ -100,6 +124,20 @@ tests, and explicitly approve the merge.
 ---
 
 ## Session Sync Log (newest first)
+
+### 2026-07-28 — Machine: G6-PF5DSHVY — Explorer cascade repair
+
+- Changed: registry integration to use a current-user
+  `ExtendedSubCommandsKey` reference and separate project-owned submenu store.
+- Changed: setup/Repair/Uninstall to remove only exact recognized prototype
+  `FolderColor_<Color>` entries and notify the Shell of association changes.
+- Changed: tests for live registry shape, command safety, cleanup scope,
+  idempotence, rescan removal, and uninstall.
+- Changed: Changelog and Handoff with the live root cause and pending manual
+  Explorer retest.
+- Local ignored: pre-repair registry export under `files/test-logs/`.
+- Note: the temporary implementation plan remains intentionally committed;
+  do not delete or merge until manual approval.
 
 ### 2026-07-28 — Machine: G6-PF5DSHVY — Step 1 launcher fix
 

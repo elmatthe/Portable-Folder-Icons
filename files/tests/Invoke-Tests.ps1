@@ -70,8 +70,28 @@ endlocal
     Assert-Equal ([IO.Path]::GetFullPath($CheckoutPath)) ([IO.Path]::GetFullPath($captured)) $Name
 }
 
+function Get-TestRegistrySnapshot {
+    param([string[]]$Roots)
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($root in @($Roots | Sort-Object)) {
+        if (-not (Test-Path -LiteralPath $root)) { continue }
+        $keys = @((Get-Item -LiteralPath $root)) +
+            @(Get-ChildItem -LiteralPath $root -Recurse)
+        foreach ($key in @($keys | Sort-Object Name)) {
+            $lines.Add('KEY=' + $key.Name)
+            foreach ($valueName in @($key.GetValueNames() | Sort-Object)) {
+                $lines.Add(('{0}={1}' -f $valueName, [string]$key.GetValue($valueName)))
+            }
+        }
+    }
+    return ($lines -join "`n")
+}
+
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('PfiTests-' + [guid]::NewGuid().ToString('N'))
 [void](New-Item -ItemType Directory -Path $testRoot)
+$registryTestBase = $null
+$registryTestSubcommands = $null
 try {
     Assert-Equal 'Blue' (ConvertTo-PfiMenuLabel 'Folder_Blue.ico') 'normalizes Folder_ prefix'
     Assert-Equal 'Work Projects' (ConvertTo-PfiMenuLabel 'Work__Projects.ico') 'normalizes underscores and whitespace'
@@ -178,8 +198,11 @@ try {
 
     $commandInstallRoot = 'C:\Users\Test User\Local & Data (β)%!'
     $registryRoot = 'HKCU:\Software\PortableFolderIcons\Tests\DryRun'
+    $subcommandsReference = 'PortableFolderIcons.Tests.DryRunSubcommands'
+    $subcommandsRoot = 'HKCU:\Software\Classes\' + $subcommandsReference
     $registryPlan = @(Get-PfiRegistryPlan -Manifest $installedManifest `
         -InstallRoot $commandInstallRoot -RegistryRoot $registryRoot `
+        -SubcommandsRoot $subcommandsRoot -SubcommandsReference $subcommandsReference `
         -PowerShellPath 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe')
     Assert-Equal 10 @($registryPlan | Where-Object { $_.Name -eq 'MUIVerb' -and $_.Value -in @(
         'Black', 'Blue', 'Gray', 'Green', 'Orange', 'Pink', 'Purple', 'Red', 'Teal', 'Yellow'
@@ -189,6 +212,19 @@ try {
     } | Select-Object -ExpandProperty Value)
     Assert-Equal 'Black,Blue,Gray,Green,Orange,Pink,Purple,Red,Teal,Yellow' ($iconLabels -join ',') 'registry icon verbs are alphabetic'
     Assert-Equal 'Single' ($registryPlan | Where-Object Name -eq 'MultiSelectModel').Value 'registry enforces single selection'
+    Assert-Equal $subcommandsReference (
+        $registryPlan | Where-Object { $_.Path -eq $registryRoot -and $_.Name -eq 'ExtendedSubCommandsKey' }
+    ).Value 'parent references the separate submenu store'
+    Assert-Equal 0 @($registryPlan | Where-Object {
+        $_.Path -eq (Join-Path $registryRoot 'command')
+    }).Count 'parent has no executable command'
+    Assert-Equal 0 @($registryPlan | Where-Object {
+        $_.Path.StartsWith((Join-Path $registryRoot 'ExtendedSubCommandsKey'), [StringComparison]::OrdinalIgnoreCase)
+    }).Count 'ExtendedSubCommandsKey is a value rather than a child key'
+    Assert-Equal 10 @($registryPlan | Where-Object {
+        $_.Path.StartsWith((Join-Path $subcommandsRoot 'shell\Icon_'), [StringComparison]::OrdinalIgnoreCase) -and
+        $_.Name -eq 'MUIVerb'
+    }).Count 'every accepted ICO has exactly one stored submenu action'
     $applyCommand = ($registryPlan | Where-Object {
         $_.Name -eq '' -and $_.Value -match ' -Action Apply '
     } | Select-Object -First 1).Value
@@ -197,13 +233,99 @@ try {
     Assert-Equal $false ($applyCommand.Contains('-Command')) 'registry never interpolates target into PowerShell code'
     Assert-True (@($registryPlan | Where-Object { $_.Value -eq 'Repair Portable Folder Icons' }).Count -eq 1) 'registry includes Repair'
     Assert-True (@($registryPlan | Where-Object { $_.Value -eq 'Uninstall Portable Folder Icons' }).Count -eq 1) 'registry includes Uninstall'
+    $installedRegistryPlan = @(Get-PfiRegistryPlan -Manifest $installedManifest -InstallRoot $installRoot `
+        -RegistryRoot $registryRoot -SubcommandsRoot $subcommandsRoot `
+        -SubcommandsReference $subcommandsReference)
+    $installedCommands = @($installedRegistryPlan | Where-Object Name -eq '' | Select-Object -ExpandProperty Value)
+    Assert-Equal 13 $installedCommands.Count 'icon and utility actions each have one command'
+    Assert-Equal 13 @($installedCommands | Where-Object {
+        $_.Contains('"' + (Join-Path (Join-Path $installRoot 'runtime') 'Invoke-PortableFolderIcons.ps1') + '"')
+    }).Count 'all actions point to the installed dispatcher'
+    Assert-True (Test-Path -LiteralPath (Join-Path (Join-Path $installRoot 'runtime') 'Invoke-PortableFolderIcons.ps1') -PathType Leaf) 'installed action dispatcher exists'
     Assert-Throws {
         Register-PfiContextMenu -Manifest $installedManifest -InstallRoot $installRoot `
             -RegistryRoot 'HKCU:\Software\Classes\Directory\shell\ForeignTool' -WhatIf
     } 'registration rejects foreign HKCU subtree'
     $dryRun = @(Register-PfiContextMenu -Manifest $installedManifest -InstallRoot $installRoot `
-        -RegistryRoot $registryRoot -WhatIf)
+        -RegistryRoot $registryRoot -SubcommandsRoot $subcommandsRoot `
+        -SubcommandsReference $subcommandsReference -DirectoryShellRoot $registryRoot -WhatIf)
     Assert-Equal $registryPlan.Count $dryRun.Count 'dry-run registration returns the complete disposable registry plan'
+
+    $registryTestBase = 'HKCU:\Software\PortableFolderIcons\Tests\Cascade-' + [guid]::NewGuid().ToString('N')
+    $testDirectoryShell = Join-Path $registryTestBase 'DirectoryShell'
+    $testParent = Join-Path $testDirectoryShell 'PortableFolderIcons'
+    $testReference = 'PortableFolderIcons.Tests.' + [guid]::NewGuid().ToString('N')
+    $testSubcommands = 'HKCU:\Software\Classes\' + $testReference
+    $registryTestSubcommands = $testSubcommands
+    $unrelated = Join-Path $testDirectoryShell 'UnrelatedTool'
+    [void](New-Item -Path (Join-Path $unrelated 'command') -Force)
+    Set-Item -LiteralPath $unrelated -Value 'Keep this integration'
+    Set-Item -LiteralPath (Join-Path $unrelated 'command') -Value '"C:\Tools\keep.exe" "%1"'
+    foreach ($color in @('Black', 'Blue', 'Gray', 'Green', 'Orange', 'Pink', 'Purple', 'Red', 'Teal', 'Yellow')) {
+        $legacy = Join-Path $testDirectoryShell ('FolderColor_' + $color)
+        [void](New-Item -Path (Join-Path $legacy 'command') -Force)
+        Set-Item -LiteralPath $legacy -Value ('Color: ' + $color)
+        Set-Item -LiteralPath (Join-Path $legacy 'command') -Value (
+            '"C:\Old\pwsh.exe" -File "C:\Old\Portable-Folder-Colours\SetFolderColor.ps1" ' +
+            '-folderPath "%1" -iconPath "C:\Old\Portable-Folder-Colours\Folder_' + $color + '.ico,0"'
+        )
+    }
+    $lookalike = Join-Path $testDirectoryShell 'FolderColor_Custom'
+    [void](New-Item -Path (Join-Path $lookalike 'command') -Force)
+    Set-Item -LiteralPath $lookalike -Value 'Color: Custom'
+    Set-Item -LiteralPath (Join-Path $lookalike 'command') -Value '"C:\ThirdParty\color.exe" "%1"'
+    Assert-Equal 10 @(Get-PfiRecognizedLegacyContextMenuPaths -DirectoryShellRoot $testDirectoryShell).Count 'all exact legacy prototype entries are recognized'
+
+    [void](Register-PfiContextMenu -Manifest $installedManifest -InstallRoot $commandInstallRoot `
+        -RegistryRoot $testParent -SubcommandsRoot $testSubcommands `
+        -SubcommandsReference $testReference -DirectoryShellRoot $testDirectoryShell)
+    Assert-Equal $testReference ([string](Get-Item -LiteralPath $testParent).GetValue('ExtendedSubCommandsKey')) 'live parent has cascade reference'
+    Assert-Equal $false (Test-Path -LiteralPath (Join-Path $testParent 'command')) 'live parent has no command handler'
+    Assert-True (Test-Path -LiteralPath (Join-Path $testSubcommands 'shell')) 'referenced submenu storage exists'
+    Assert-Equal $testSubcommands ('HKCU:\Software\Classes\' +
+        [string](Get-Item -LiteralPath $testParent).GetValue('ExtendedSubCommandsKey')) 'submenu storage matches parent reference'
+    Assert-Equal 10 @(Get-ChildItem -LiteralPath (Join-Path $testSubcommands 'shell') |
+        Where-Object PSChildName -like 'Icon_*').Count 'isolated registry contains ten icon actions'
+    Assert-Equal 0 @(Get-ChildItem -LiteralPath $testDirectoryShell |
+        Where-Object PSChildName -like 'FolderColor_*' |
+        Where-Object PSChildName -ne 'FolderColor_Custom').Count 'recognized legacy Color entries are removed'
+    Assert-True (Test-Path -LiteralPath $unrelated) 'unrelated context-menu entry survives setup cleanup'
+    Assert-True (Test-Path -LiteralPath $lookalike) 'unrecognized Color lookalike survives setup cleanup'
+
+    $firstRegistryState = Get-TestRegistrySnapshot @($testParent, $testSubcommands, $testDirectoryShell)
+    [void](Register-PfiContextMenu -Manifest $installedManifest -InstallRoot $commandInstallRoot `
+        -RegistryRoot $testParent -SubcommandsRoot $testSubcommands `
+        -SubcommandsReference $testReference -DirectoryShellRoot $testDirectoryShell)
+    $secondRegistryState = Get-TestRegistrySnapshot @($testParent, $testSubcommands, $testDirectoryShell)
+    Assert-Equal $firstRegistryState $secondRegistryState 'repeated registration is idempotent'
+
+    $reducedManifest = $installedManifest | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+    $removedEntry = @($reducedManifest.entries | Where-Object validationState -eq 'Accepted')[0]
+    $reducedManifest.entries = @($reducedManifest.entries | Where-Object {
+        $_.hash -ne $removedEntry.hash
+    })
+    [void](Register-PfiContextMenu -Manifest $reducedManifest -InstallRoot $commandInstallRoot `
+        -RegistryRoot $testParent -SubcommandsRoot $testSubcommands `
+        -SubcommandsReference $testReference -DirectoryShellRoot $testDirectoryShell)
+    Assert-Equal 9 @(Get-ChildItem -LiteralPath (Join-Path $testSubcommands 'shell') |
+        Where-Object PSChildName -like 'Icon_*').Count 'rescan removes obsolete submenu action'
+    Assert-Equal 0 @(Get-ChildItem -LiteralPath (Join-Path $testSubcommands 'shell') |
+        Where-Object PSChildName -match ([regex]::Escape([string]$removedEntry.hash))).Count 'removed ICO hash is absent from submenu'
+
+    $legacyBlue = Join-Path $testDirectoryShell 'FolderColor_Blue'
+    [void](New-Item -Path (Join-Path $legacyBlue 'command') -Force)
+    Set-Item -LiteralPath $legacyBlue -Value 'Color: Blue'
+    Set-Item -LiteralPath (Join-Path $legacyBlue 'command') -Value (
+        '"C:\Old\pwsh.exe" -File "C:\Old\Portable-Folder-Colours\SetFolderColor.ps1" ' +
+        '-folderPath "%1" -iconPath "C:\Old\Portable-Folder-Colours\Folder_Blue.ico,0"'
+    )
+    Remove-PfiContextMenu -RegistryRoot $testParent -SubcommandsRoot $testSubcommands `
+        -DirectoryShellRoot $testDirectoryShell -Confirm:$false
+    Assert-Equal $false (Test-Path -LiteralPath $testParent) 'uninstall removes current parent menu'
+    Assert-Equal $false (Test-Path -LiteralPath $testSubcommands) 'uninstall removes submenu storage'
+    Assert-Equal $false (Test-Path -LiteralPath $legacyBlue) 'uninstall removes recognized legacy menu'
+    Assert-True (Test-Path -LiteralPath $unrelated) 'unrelated context-menu entry survives uninstall'
+    Assert-True (Test-Path -LiteralPath $lookalike) 'unrecognized Color lookalike survives uninstall'
 
     $actionFolder = Join-Path $testRoot 'Action Target (ü)'
     [void](New-Item -ItemType Directory -Path $actionFolder)
@@ -304,6 +426,12 @@ try {
     Assert-Equal $false (Test-Path -LiteralPath (Join-Path $uninstallRoot 'icons')) 'explicit purge removes cache'
 }
 finally {
+    if ($null -ne $registryTestSubcommands -and (Test-Path -LiteralPath $registryTestSubcommands)) {
+        Remove-Item -LiteralPath $registryTestSubcommands -Recurse -Force
+    }
+    if ($null -ne $registryTestBase -and (Test-Path -LiteralPath $registryTestBase)) {
+        Remove-Item -LiteralPath $registryTestBase -Recurse -Force
+    }
     if (Test-Path -LiteralPath $testRoot) {
         Remove-Item -LiteralPath $testRoot -Recurse -Force
     }
