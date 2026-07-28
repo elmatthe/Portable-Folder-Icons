@@ -17,12 +17,13 @@ $installRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'PortableFolderIcons.Maintenance.ps1')
 
 try {
+    $actionResult = $null
     switch ($Action) {
         'Apply' {
-            [void](Invoke-PfiApply -TargetPath $TargetPath -IconHash $IconHash -InstallRoot $installRoot)
+            $actionResult = Invoke-PfiApply -TargetPath $TargetPath -IconHash $IconHash -InstallRoot $installRoot
         }
         'Reset' {
-            [void](Invoke-PfiReset -TargetPath $TargetPath)
+            $actionResult = Invoke-PfiReset -TargetPath $TargetPath
         }
         'Repair' {
             $repair = Invoke-PfiRepair -InstallRoot $installRoot
@@ -65,11 +66,23 @@ try {
         }
     }
     Add-Type -AssemblyName PresentationFramework
+    $completionMessage = if ($null -ne $actionResult -and -not $actionResult.RefreshSucceeded) {
+        ('{0} completed and the folder customization was saved, but Explorer could not be refreshed automatically. The icon may update after Explorer processes the change.' -f $Action)
+    }
+    else {
+        ('{0} completed successfully.' -f $Action)
+    }
+    $completionImage = if ($null -ne $actionResult -and -not $actionResult.RefreshSucceeded) {
+        [Windows.MessageBoxImage]::Warning
+    }
+    else {
+        [Windows.MessageBoxImage]::Information
+    }
     [void][Windows.MessageBox]::Show(
-        ('{0} completed successfully.' -f $Action),
+        $completionMessage,
         'Portable Folder Icons',
         [Windows.MessageBoxButton]::OK,
-        [Windows.MessageBoxImage]::Information
+        $completionImage
     )
     exit 0
 }

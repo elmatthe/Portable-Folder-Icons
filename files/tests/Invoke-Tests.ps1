@@ -88,6 +88,19 @@ function Get-TestRegistrySnapshot {
     return ($lines -join "`n")
 }
 
+function New-TestExplorerWindow {
+    param([string]$LocationUrl)
+
+    $window = [pscustomobject]@{
+        LocationURL = $LocationUrl
+        Refreshed = $false
+    }
+    $window | Add-Member -MemberType ScriptMethod -Name Refresh -Value {
+        $this.Refreshed = $true
+    }
+    return $window
+}
+
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('PfiTests-' + [guid]::NewGuid().ToString('N'))
 [void](New-Item -ItemType Directory -Path $testRoot)
 $registryTestBase = $null
@@ -354,6 +367,100 @@ try {
     Assert-Equal $false ($afterReset.Contains('IconResource=')) 'filesystem reset removes icon customization'
     [void](Invoke-PfiReset -TargetPath @($actionFolder) -SkipRefresh)
     Assert-True (Test-Path -LiteralPath $actionIni) 'filesystem reset is idempotent with unrelated content'
+
+    $specialFolder = Join-Path $testRoot "Refresh % ! O'Brien & (üñîçødé)"
+    [void](New-Item -ItemType Directory -Path $specialFolder)
+    $specialOriginalAttributes = [IO.File]::GetAttributes($specialFolder) -bor
+        [IO.FileAttributes]::NotContentIndexed
+    [IO.File]::SetAttributes($specialFolder, $specialOriginalAttributes)
+    $refreshOrder = New-Object System.Collections.Generic.List[string]
+    $refreshBoundary = {
+        param($ChangedFolder, $DesktopIniChange)
+        $refreshOrder.Add($DesktopIniChange)
+        $changedIni = Join-Path $ChangedFolder 'desktop.ini'
+        Assert-True (Test-Path -LiteralPath $changedIni -PathType Leaf) 'desktop.ini exists before refresh boundary'
+        Assert-True (([IO.File]::GetAttributes($changedIni) -band [IO.FileAttributes]::Hidden) -ne 0) 'desktop.ini is Hidden before refresh boundary'
+        Assert-True (([IO.File]::GetAttributes($changedIni) -band [IO.FileAttributes]::System) -ne 0) 'desktop.ini is System before refresh boundary'
+        Assert-True (([IO.File]::GetAttributes($ChangedFolder) -band [IO.FileAttributes]::ReadOnly) -ne 0) 'folder is ReadOnly before refresh boundary'
+        return [pscustomobject]@{ RefreshSucceeded = $true }
+    }
+    $firstRefreshApply = Invoke-PfiApply -TargetPath @($specialFolder) `
+        -IconHash $installedManifest.entries[0].hash -InstallRoot $installRoot `
+        -RefreshAction $refreshBoundary
+    Assert-Equal 'Create' $refreshOrder[0] 'initial apply refresh follows completed desktop.ini creation'
+    Assert-Equal $true $firstRefreshApply.RefreshSucceeded 'initial apply reports successful refresh boundary'
+    Assert-True (([IO.File]::GetAttributes($specialFolder) -band [IO.FileAttributes]::NotContentIndexed) -ne 0) 'apply preserves unrelated folder attributes'
+    $specialIni = Join-Path $specialFolder 'desktop.ini'
+    [IO.File]::SetAttributes(
+        $specialIni,
+        ([IO.File]::GetAttributes($specialIni) -bor [IO.FileAttributes]::NotContentIndexed)
+    )
+
+    $secondRefreshApply = Invoke-PfiApply -TargetPath @($specialFolder) `
+        -IconHash $installedManifest.entries[1].hash -InstallRoot $installRoot `
+        -RefreshAction $refreshBoundary
+    Assert-Equal 'Update' $refreshOrder[1] 'different-icon apply refreshes an existing customization'
+    Assert-True (([IO.File]::ReadAllText((Join-Path $specialFolder 'desktop.ini'))).Contains(
+        ([string]$installedManifest.entries[1].hash + '.ico,0')
+    )) 'different-icon apply commits the new cached icon before refresh'
+    Assert-True (([IO.File]::GetAttributes($specialIni) -band [IO.FileAttributes]::NotContentIndexed) -ne 0) 'different-icon apply preserves unrelated desktop.ini attributes'
+
+    $notificationLog = New-Object System.Collections.Generic.List[object]
+    $notificationBoundary = {
+        param($EventId, $Flags, $Path)
+        $notificationLog.Add([pscustomobject]@{
+            EventId = [long]$EventId
+            Flags = [uint32]$Flags
+            Path = [string]$Path
+        })
+    }
+    $matchingWindow = New-TestExplorerWindow ((New-Object Uri(
+        ([IO.Path]::GetFullPath((Split-Path -Parent $specialFolder)) + '\')
+    )).AbsoluteUri)
+    $otherWindow = New-TestExplorerWindow ((New-Object Uri(
+        ([IO.Path]::GetFullPath($specialFolder) + '\')
+    )).AbsoluteUri)
+    $windowBoundary = { @($matchingWindow, $otherWindow) }
+    $refreshResult = Send-PfiExplorerRefresh -FolderPath $specialFolder `
+        -DesktopIniChange Update -NotificationAction $notificationBoundary `
+        -ExplorerWindowsProvider $windowBoundary
+    Assert-Equal 4 $refreshResult.NotificationsIssued 'refresh issues desktop.ini, folder, and parent notifications'
+    Assert-Equal '8192,2048,8192,4096' (($notificationLog.EventId) -join ',') 'refresh uses update-item, attributes, update-item, and updated-dir events'
+    Assert-Equal 4101 $refreshResult.NotificationFlags 'refresh uses Unicode paths with synchronous flush'
+    Assert-Equal ([IO.Path]::GetFullPath((Join-Path $specialFolder 'desktop.ini'))) $notificationLog[0].Path 'refresh targets desktop.ini'
+    Assert-Equal ([IO.Path]::GetFullPath($specialFolder).TrimEnd('\')) $notificationLog[1].Path 'refresh targets customized folder attributes'
+    Assert-Equal ([IO.Path]::GetFullPath((Split-Path -Parent $specialFolder)).TrimEnd('\')) $notificationLog[3].Path 'refresh targets parent directory'
+    Assert-Equal $true $matchingWindow.Refreshed 'Explorer view displaying parent is refreshed'
+    Assert-Equal $false $otherWindow.Refreshed 'Explorer view displaying customized folder is not refreshed'
+    Assert-Equal 1 $refreshResult.MatchedExplorerWindows 'only the parent Explorer view is selected'
+
+    $failedRefreshBoundary = {
+        param($ChangedFolder, $DesktopIniChange)
+        return [pscustomobject]@{
+            RefreshSucceeded = $false
+            Warnings = @('simulated refresh failure')
+        }
+    }
+    $failedRefreshApply = Invoke-PfiApply -TargetPath @($specialFolder) `
+        -IconHash $installedManifest.entries[2].hash -InstallRoot $installRoot `
+        -RefreshAction $failedRefreshBoundary
+    Assert-Equal $true $failedRefreshApply.Applied 'refresh failure does not report icon application failure'
+    Assert-Equal $false $failedRefreshApply.RefreshSucceeded 'refresh failure is reported separately'
+
+    $resetRefreshChanges = New-Object System.Collections.Generic.List[string]
+    $resetRefreshBoundary = {
+        param($ChangedFolder, $DesktopIniChange)
+        $resetRefreshChanges.Add($DesktopIniChange)
+        Assert-Equal $false (Test-Path -LiteralPath (Join-Path $ChangedFolder 'desktop.ini')) 'reset deletes owned-only desktop.ini before refresh'
+        return [pscustomobject]@{ RefreshSucceeded = $true }
+    }
+    [void](Invoke-PfiReset -TargetPath @($specialFolder) -RefreshAction $resetRefreshBoundary)
+    Assert-Equal 'Delete' $resetRefreshChanges[0] 'reset uses equivalent deleted-desktop.ini refresh handling'
+
+    $dispatcherText = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\Windows\Invoke-PortableFolderIcons.ps1') -Raw
+    Assert-True ($dispatcherText.IndexOf('$actionResult = Invoke-PfiApply') -lt
+        $dispatcherText.IndexOf('[void][Windows.MessageBox]::Show(')) 'success dialog is ordered after Apply and refresh completion'
+    Assert-True ($dispatcherText.Contains('but Explorer could not be refreshed automatically')) 'dispatcher distinguishes refresh warning from apply failure'
 
     $emptyFolder = Join-Path $testRoot 'Empty Reset'
     [void](New-Item -ItemType Directory -Path $emptyFolder)

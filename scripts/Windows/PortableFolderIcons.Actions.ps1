@@ -86,7 +86,13 @@ function Write-PfiDesktopIniSafely {
         $encoding = New-Object Text.UnicodeEncoding($false, $true)
         [IO.File]::WriteAllText($temporaryPath, $Content, $encoding)
         Move-Item -LiteralPath $temporaryPath -Destination $iniPath -Force
-        $newAttributes = [IO.File]::GetAttributes($iniPath) -bor
+        $baseAttributes = if ($null -ne $originalAttributes) {
+            $originalAttributes
+        }
+        else {
+            [IO.File]::GetAttributes($iniPath)
+        }
+        $newAttributes = $baseAttributes -bor
             [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System
         Set-PfiFileAttributes $iniPath $newAttributes
         return [pscustomobject]@{ Path = $iniPath; Deleted = $false }
@@ -118,10 +124,20 @@ function Write-PfiDesktopIniSafely {
 
 function Send-PfiExplorerRefresh {
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)][string]$FolderPath)
+    param(
+        [Parameter(Mandatory = $true)][string]$FolderPath,
+        [ValidateSet('Create', 'Update', 'Delete', 'None')]
+        [string]$DesktopIniChange = 'Update',
+        [scriptblock]$NotificationAction,
+        [scriptblock]$ExplorerWindowsProvider
+    )
 
-    if (-not ('PortableFolderIcons.NativeMethods' -as [type])) {
-        Add-Type -TypeDefinition @'
+    $folder = [IO.Path]::GetFullPath($FolderPath).TrimEnd('\')
+    $desktopIni = Join-Path $folder 'desktop.ini'
+    $parent = [IO.Path]::GetFullPath((Split-Path -Parent $folder)).TrimEnd('\')
+    if ($null -eq $NotificationAction) {
+        if (-not ('PortableFolderIcons.NativeMethods' -as [type])) {
+            Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 namespace PortableFolderIcons {
@@ -132,35 +148,107 @@ namespace PortableFolderIcons {
     }
 }
 '@
+        }
+        $NotificationAction = {
+            param([long]$EventId, [uint32]$Flags, [string]$Path)
+            [PortableFolderIcons.NativeMethods]::SHChangeNotify(
+                $EventId,
+                $Flags,
+                $Path,
+                [IntPtr]::Zero
+            )
+        }
     }
-    # SHCNE_ATTRIBUTES | SHCNE_UPDATEITEM, SHCNF_PATHW | SHCNF_FLUSHNOWAIT
-    [PortableFolderIcons.NativeMethods]::SHChangeNotify(
-        0x00000800 -bor 0x00002000,
-        0x00000005 -bor 0x00003000,
-        $FolderPath,
-        [IntPtr]::Zero
-    )
+    if ($null -eq $ExplorerWindowsProvider) {
+        $ExplorerWindowsProvider = {
+            $shell = New-Object -ComObject Shell.Application
+            return @($shell.Windows())
+        }
+    }
 
-    $parent = Split-Path -Parent $FolderPath
+    $warnings = New-Object System.Collections.Generic.List[string]
+    $notifications = New-Object System.Collections.Generic.List[object]
+    # SHCNF_PATHW | SHCNF_FLUSH. FLUSH waits for delivery before refreshing views.
+    [uint32]$notificationFlags = 0x00000005 -bor 0x00001000
+    if ($DesktopIniChange -ne 'None') {
+        [long]$desktopIniEvent = switch ($DesktopIniChange) {
+            'Create' { 0x00000002 } # SHCNE_CREATE
+            'Delete' { 0x00000004 } # SHCNE_DELETE
+            default { 0x00002000 }  # SHCNE_UPDATEITEM
+        }
+        $notifications.Add([pscustomobject]@{
+            Event = $DesktopIniChange
+            EventId = $desktopIniEvent
+            Path = $desktopIni
+        })
+    }
+    $notifications.Add([pscustomobject]@{
+        Event = 'Attributes'
+        EventId = [long]0x00000800 # SHCNE_ATTRIBUTES
+        Path = $folder
+    })
+    $notifications.Add([pscustomobject]@{
+        Event = 'UpdateItem'
+        EventId = [long]0x00002000 # SHCNE_UPDATEITEM
+        Path = $folder
+    })
+    $notifications.Add([pscustomobject]@{
+        Event = 'UpdateDirectory'
+        EventId = [long]0x00001000 # SHCNE_UPDATEDIR
+        Path = $parent
+    })
+
+    $issued = 0
+    foreach ($notification in $notifications) {
+        try {
+            & $NotificationAction $notification.EventId $notificationFlags $notification.Path
+            $issued++
+        }
+        catch {
+            $warnings.Add(
+                "Shell notification '$($notification.Event)' failed: $($_.Exception.Message)"
+            )
+        }
+    }
+
+    $matchedWindows = 0
+    $refreshedWindows = 0
     try {
-        $shell = New-Object -ComObject Shell.Application
-        foreach ($window in @($shell.Windows())) {
+        foreach ($window in @(& $ExplorerWindowsProvider)) {
             try {
                 if ([string]::IsNullOrWhiteSpace([string]$window.LocationURL)) { continue }
                 $uri = New-Object Uri([string]$window.LocationURL)
                 if (-not $uri.IsFile) { continue }
                 $location = [IO.Path]::GetFullPath($uri.LocalPath).TrimEnd('\')
-                if ($location.Equals($parent.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) {
+                if ($location.Equals($parent, [StringComparison]::OrdinalIgnoreCase)) {
+                    $matchedWindows++
                     $window.Refresh()
+                    $refreshedWindows++
                 }
             }
             catch {
                 # An individual non-filesystem Explorer window must not block refresh.
+                $warnings.Add("An Explorer window could not be refreshed: $($_.Exception.Message)")
             }
         }
     }
     catch {
-        Write-Warning 'The Shell was notified, but open Explorer windows could not be refreshed directly.'
+        $warnings.Add("Explorer windows could not be enumerated: $($_.Exception.Message)")
+    }
+    foreach ($warning in $warnings) {
+        Write-Warning $warning
+    }
+    return [pscustomobject]@{
+        NotificationsPlanned = $notifications.Count
+        NotificationsIssued = $issued
+        NotificationFlags = $notificationFlags
+        Folder = $folder
+        DesktopIni = $desktopIni
+        Parent = $parent
+        MatchedExplorerWindows = $matchedWindows
+        RefreshedExplorerWindows = $refreshedWindows
+        RefreshSucceeded = ($issued -eq $notifications.Count -and $warnings.Count -eq 0)
+        Warnings = $warnings.ToArray()
     }
 }
 
@@ -182,7 +270,8 @@ function Invoke-PfiApply {
         [Parameter(Mandatory = $true)][string[]]$TargetPath,
         [Parameter(Mandatory = $true)][string]$IconHash,
         [Parameter(Mandatory = $true)][string]$InstallRoot,
-        [switch]$SkipRefresh
+        [switch]$SkipRefresh,
+        [scriptblock]$RefreshAction
     )
 
     $folder = Assert-PfiCustomizableFolder $TargetPath
@@ -225,15 +314,32 @@ function Invoke-PfiApply {
         catch { Write-Warning 'Apply failed and the original folder state could not be fully restored.' }
         throw
     }
-    if (-not $SkipRefresh) { Send-PfiExplorerRefresh $folder }
-    return [pscustomobject]@{ Action = 'Apply'; Folder = $folder; IconHash = $hash }
+    $refresh = $null
+    if (-not $SkipRefresh) {
+        $desktopIniChange = if ($iniExisted) { 'Update' } else { 'Create' }
+        if ($null -eq $RefreshAction) {
+            $refresh = Send-PfiExplorerRefresh $folder -DesktopIniChange $desktopIniChange
+        }
+        else {
+            $refresh = & $RefreshAction $folder $desktopIniChange
+        }
+    }
+    return [pscustomobject]@{
+        Action = 'Apply'
+        Folder = $folder
+        IconHash = $hash
+        Applied = $true
+        RefreshSucceeded = ($SkipRefresh -or $null -eq $refresh -or $refresh.RefreshSucceeded)
+        Refresh = $refresh
+    }
 }
 
 function Invoke-PfiReset {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string[]]$TargetPath,
-        [switch]$SkipRefresh
+        [switch]$SkipRefresh,
+        [scriptblock]$RefreshAction
     )
 
     $folder = Assert-PfiCustomizableFolder $TargetPath
@@ -244,8 +350,9 @@ function Invoke-PfiReset {
     $existing = Get-PfiExistingDesktopIni $folder
     Assert-PfiDesktopIniWellFormed $existing
     $updated = Reset-PfiDesktopIniIconContent $existing
+    $writeResult = $null
     try {
-        [void](Write-PfiDesktopIniSafely $folder $updated -DeleteWhenEmpty)
+        $writeResult = Write-PfiDesktopIniSafely $folder $updated -DeleteWhenEmpty
         if ([string]::IsNullOrEmpty($updated)) {
             Set-PfiFileAttributes $folder ($originalFolderAttributes -band (-bnot [IO.FileAttributes]::ReadOnly))
         }
@@ -261,6 +368,29 @@ function Invoke-PfiReset {
         catch { Write-Warning 'Reset failed and the original folder state could not be fully restored.' }
         throw
     }
-    if (-not $SkipRefresh) { Send-PfiExplorerRefresh $folder }
-    return [pscustomobject]@{ Action = 'Reset'; Folder = $folder }
+    $refresh = $null
+    if (-not $SkipRefresh) {
+        $desktopIniChange = if ($writeResult.Deleted) {
+            'Delete'
+        }
+        elseif ($iniExisted) {
+            'Update'
+        }
+        else {
+            'None'
+        }
+        if ($null -eq $RefreshAction) {
+            $refresh = Send-PfiExplorerRefresh $folder -DesktopIniChange $desktopIniChange
+        }
+        else {
+            $refresh = & $RefreshAction $folder $desktopIniChange
+        }
+    }
+    return [pscustomobject]@{
+        Action = 'Reset'
+        Folder = $folder
+        Applied = $true
+        RefreshSucceeded = ($SkipRefresh -or $null -eq $refresh -or $refresh.RefreshSucceeded)
+        Refresh = $refresh
+    }
 }

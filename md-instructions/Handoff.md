@@ -3,10 +3,11 @@
 ## Current Focus
 
 All implementation phases and the bug hunt are complete on
-`feature/v0.1.0-portable-folder-icons`. Two release-blocking defects found
-during manual acceptance testing are repaired and verified automatically.
-Waiting for the user to retest setup and the classic Explorer cascade before
-continuing the remaining acceptance tests or considering a merge.
+`feature/v0.1.0-portable-folder-icons`. Setup and the repaired classic cascade
+passed manual testing. The remaining Step 7 delayed Explorer repaint defect is
+repaired and verified automatically; waiting for the user to retest Apply,
+Apply Different Icon, and Reset before continuing acceptance or considering a
+merge.
 
 ---
 
@@ -14,15 +15,39 @@ continuing the remaining acceptance tests or considering a merge.
 
 | # | Severity | File | Description | Status | Found by |
 |---|----------|------|-------------|--------|----------|
-| 1 | Critical | Registry integration | The parent stored `ExtendedSubCommandsKey` as a child key instead of a REG_SZ reference, so Explorer treated **Folder Icons** as a plain executable verb; setup also left ten recognized prototype `FolderColor_*` verbs in place. | Fixed / awaiting user Explorer retest | User |
-| 2 | Critical | `Setup_and_Run-Portable-Folder-Icons.bat` | Passing the trailing-backslash checkout root as `"%~dp0"` caused native PowerShell argument parsing to retain a closing quote in the value sent to `GetFullPath`. | Fixed / awaiting user Step 1 retest | User |
-| 3 | Minor | Explorer UI | Windows may retain a stale folder image until navigating away/back despite targeted notification; documented and pending manual characterization. | Documented / manual QA | Codex |
-| 4 | Suggestion | Selection | Multi-folder apply needs safe multi-path transport and partial-failure UX. | Deferred beyond v0.1.0 per plan | User / Codex |
+| 1 | Critical | Explorer refresh | Apply notified only the customized folder using asynchronous `SHCNF_FLUSHNOWAIT`, then raced a direct view refresh; it did not notify changed `desktop.ini` or the parent directory. | Fixed / awaiting user Step 7 retest | User |
+| 2 | Critical | Registry integration | The parent stored `ExtendedSubCommandsKey` as a child key instead of a REG_SZ reference, so Explorer treated **Folder Icons** as a plain executable verb; setup also left ten recognized prototype `FolderColor_*` verbs in place. | Fixed / manual retest passed | User |
+| 3 | Critical | `Setup_and_Run-Portable-Folder-Icons.bat` | Passing the trailing-backslash checkout root as `"%~dp0"` caused native PowerShell argument parsing to retain a closing quote in the value sent to `GetFullPath`. | Fixed / manual retest passed | User |
+| 4 | Minor | Explorer UI | Windows may still retain an item image briefly after all supported targeted notifications; zero-latency repaint cannot be guaranteed. | Mitigated / manual QA | Codex |
+| 5 | Suggestion | Selection | Multi-folder apply needs safe multi-path transport and partial-failure UX. | Deferred beyond v0.1.0 per plan | User / Codex |
 
 ---
 
 ## Work Log (newest first)
 
+- 2026-07-28 — The repaired classic cascade passed manual acceptance, but
+  applying Blue over an existing yellow customization remained visually stale
+  until Explorer was reopened roughly 30 seconds later. The filesystem portion
+  was already committed before refresh: Unicode `desktop.ini` writes close
+  before atomic replacement, the file is Hidden/System, and the folder is
+  ReadOnly. The exact refresh defect was an incomplete, racy sequence:
+  `SHCNE_ATTRIBUTES|SHCNE_UPDATEITEM` targeted only the customized folder with
+  `SHCNF_PATHW|SHCNF_FLUSHNOWAIT`, immediately followed by parent-view
+  `Refresh()`. Notification delivery was not complete, `desktop.ini` and the
+  parent were never notified, and the view could repaint from the old cached
+  item image. The corrected sequence uses canonical absolute paths and
+  synchronous `SHCNF_FLUSH` for desktop.ini Create/Update/Delete, folder
+  Attributes, folder UpdateItem, and parent UpdatedDir, then refreshes only
+  Explorer views whose decoded filesystem URL equals the parent
+  case-insensitively. Apply/Reset return refresh status; their modal result is
+  shown only afterward and distinguishes a saved customization from an
+  automatic-refresh warning. Existing `desktop.ini` attributes are now
+  preserved in addition to unrelated content. Injectable tests cover ordering,
+  both Apply paths, Reset, special-character paths, targets, matching, and
+  refresh failure. All 132 assertions pass in the final verification
+  gate. A disposable real Apply/different-icon/Reset issued four notifications
+  per operation and preserved Explorer processes and window locations.
+  Manual visual Step 7 retest remains required. — Codex
 - 2026-07-28 — Diagnosed the second manual acceptance failure from the exact
   live HKCU state. The parent
   `HKCU\Software\Classes\Directory\shell\PortableFolderIcons` had MUIVerb,
@@ -124,6 +149,19 @@ continuing the remaining acceptance tests or considering a merge.
 ---
 
 ## Session Sync Log (newest first)
+
+### 2026-07-28 — Machine: G6-PF5DSHVY — targeted Explorer refresh repair
+
+- Changed: Apply/Reset refresh to notify desktop.ini, the customized folder,
+  and its parent synchronously before refreshing only parent Explorer views.
+- Changed: action results and dispatcher messaging to distinguish saved
+  customization from automatic-refresh failure.
+- Changed: tests for operation ordering, special-character paths,
+  different-icon apply, Reset, target selection, attributes, and failure.
+- Changed: Changelog and Handoff with the manual delay and pending visual
+  retest.
+- Note: the temporary implementation plan remains intentionally committed;
+  do not delete or merge until manual approval.
 
 ### 2026-07-28 — Machine: G6-PF5DSHVY — Explorer cascade repair
 

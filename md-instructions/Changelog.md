@@ -33,6 +33,12 @@
 
 ### Fixed
 
+- Strengthened Apply and Reset repaint handling by synchronously notifying the
+  Shell about desktop.ini creation/update/deletion, folder attributes and item
+  changes, and parent-directory changes before refreshing only Explorer views
+  displaying that parent. Completion dialogs now follow all refresh attempts
+  and distinguish an applied customization from an automatic-refresh warning;
+  existing unrelated desktop.ini attributes are preserved.
 - Repaired the classic Explorer cascade by replacing the malformed
   `ExtendedSubCommandsKey` child tree with the required REG_SZ reference to a
   separate current-user Classes submenu store. Setup, Repair, and Uninstall
