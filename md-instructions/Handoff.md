@@ -2,8 +2,8 @@
 
 ## Current Focus
 
-Phases 0–2 are complete and verified. Phase 3 classic HKCU context-menu
-integration is next on `feature/v0.1.0-portable-folder-icons`.
+Phases 0–3 are complete and verified. Phase 4 Apply, Reset, and targeted Shell
+refresh is next on `feature/v0.1.0-portable-folder-icons`.
 
 ---
 
@@ -17,6 +17,14 @@ integration is next on `feature/v0.1.0-portable-folder-icons`.
 
 ## Work Log (newest first)
 
+- 2026-07-28 — Phase 3 checkpoint passed under Windows PowerShell 5.1. Added
+  the documented HKCU `ExtendedSubCommandsKey\shell` cascade, alphabetic
+  hash-derived icon verbs, separator flag, Reset/Repair/Uninstall commands,
+  `MultiSelectModel=Single`, fixed `-File` action commands, strict tool-owned
+  registry guards, and setup registration after runtime/manifest validation.
+  A complete disposable-root dry-run plan and special-character LocalAppData
+  path are covered; 44 assertions pass and `git diff --check` is clean.
+  — Codex
 - 2026-07-28 — Phase 2 checkpoint passed under Windows PowerShell 5.1. Replaced
   the generic Python launcher with a non-admin inbox-PowerShell launcher and
   added staged runtime installation, immediate ICO rescan, hash-cache
@@ -45,6 +53,14 @@ integration is next on `feature/v0.1.0-portable-folder-icons`.
 ---
 
 ## Session Sync Log (newest first)
+
+### 2026-07-28 — Machine: G6-PF5DSHVY — pushed with Phase 3 checkpoint
+
+- Added: `scripts/Windows/PortableFolderIcons.Integration.ps1`.
+- Added: `scripts/Windows/Invoke-PortableFolderIcons.ps1`.
+- Changed: installer to stage four runtime scripts and register after
+  validation.
+- Changed: tests, Changelog, Decisions, and Handoff for Phase 3.
 
 ### 2026-07-28 — Machine: G6-PF5DSHVY — pushed with Phase 2 checkpoint
 

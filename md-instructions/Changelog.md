@@ -12,6 +12,9 @@
 - Added the Windows PowerShell 5.1 setup launcher and staged LocalAppData
   runtime installer with validated icon rescan, atomic manifest writes,
   content-hash cache reuse, and readable results/totals.
+- Added a current-user classic **Folder Icons** cascade with alphabetic
+  hash-keyed icon verbs, Reset, Repair, and Uninstall commands, plus
+  single-selection registration and fixed-script argument boundaries.
 
 ### Changed
 

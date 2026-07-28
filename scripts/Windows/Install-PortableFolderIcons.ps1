@@ -25,6 +25,11 @@ if (-not (Test-Path -LiteralPath $corePath -PathType Leaf)) {
     throw "Required core script is missing: $corePath"
 }
 . $corePath
+$integrationPath = Join-Path $PSScriptRoot 'PortableFolderIcons.Integration.ps1'
+if (-not (Test-Path -LiteralPath $integrationPath -PathType Leaf)) {
+    throw "Required integration script is missing: $integrationPath"
+}
+. $integrationPath
 Add-Type -AssemblyName System.Drawing
 
 function Write-SetupSummary {
@@ -75,7 +80,7 @@ try {
     Write-Host 'Staging and validating runtime scripts...'
 
     $runtimeSources = @(Get-ChildItem -LiteralPath $sourceScripts -Filter '*.ps1' -File | Sort-Object Name)
-    if ($runtimeSources.Count -lt 2) {
+    if ($runtimeSources.Count -lt 4) {
         throw 'The staged runtime is incomplete.'
     }
     foreach ($source in $runtimeSources) {
@@ -121,6 +126,10 @@ try {
     $runtimeActivated = $true
     Move-Item -LiteralPath $stagedManifest -Destination $manifestPath -Force
 
+    if (-not $SkipRegistry) {
+        [void](Register-PfiContextMenu -Manifest (Read-PfiManifest $manifestPath) -InstallRoot $InstallRoot)
+    }
+
     if ($runtimeMoved -and (Test-Path -LiteralPath $oldRuntime -PathType Container)) {
         [void](Assert-PfiPathWithinRoot -CandidatePath $oldRuntime -AllowedRoot $InstallRoot)
         Remove-Item -LiteralPath $oldRuntime -Recurse -Force
@@ -135,7 +144,7 @@ try {
         Runtime = $runtimePath
         Icons = $iconsPath
         Manifest = $manifestPath
-        Registry = if ($SkipRegistry) { 'Skipped by request' } else { 'Registration is added in Phase 3' }
+        Registry = if ($SkipRegistry) { 'Skipped by request' } else { $script:PfiProductionRegistryRoot }
     } | Format-List | Out-Host
     exit 0
 }

@@ -4,6 +4,7 @@ param()
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 . (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Core.ps1')
+. (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Integration.ps1')
 Add-Type -AssemblyName System.Drawing
 
 $script:Passed = 0
@@ -130,6 +131,35 @@ try {
         -RepositoryRoot $repoRoot -InstallRoot $installRoot -SkipRegistry *> $null
     Assert-Equal 0 $LASTEXITCODE 'installer rerun is idempotent'
     Assert-Equal $cachedBefore @(Get-ChildItem -LiteralPath (Join-Path $installRoot 'icons') -Filter '*.ico').Count 'installer preserves hash cache on rerun'
+
+    $commandInstallRoot = 'C:\Users\Test User\Local & Data (β)%!'
+    $registryRoot = 'HKCU:\Software\PortableFolderIcons\Tests\DryRun'
+    $registryPlan = @(Get-PfiRegistryPlan -Manifest $installedManifest `
+        -InstallRoot $commandInstallRoot -RegistryRoot $registryRoot `
+        -PowerShellPath 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe')
+    Assert-Equal 10 @($registryPlan | Where-Object { $_.Name -eq 'MUIVerb' -and $_.Value -in @(
+        'Black', 'Blue', 'Gray', 'Green', 'Orange', 'Pink', 'Purple', 'Red', 'Teal', 'Yellow'
+    ) }).Count 'registry plan contains ten icon verbs'
+    $iconLabels = @($registryPlan | Where-Object {
+        $_.Name -eq 'MUIVerb' -and $_.Value -notlike '*Portable*' -and $_.Value -ne 'Folder Icons' -and $_.Value -ne 'Reset to Default'
+    } | Select-Object -ExpandProperty Value)
+    Assert-Equal 'Black,Blue,Gray,Green,Orange,Pink,Purple,Red,Teal,Yellow' ($iconLabels -join ',') 'registry icon verbs are alphabetic'
+    Assert-Equal 'Single' ($registryPlan | Where-Object Name -eq 'MultiSelectModel').Value 'registry enforces single selection'
+    $applyCommand = ($registryPlan | Where-Object {
+        $_.Name -eq '' -and $_.Value -match ' -Action Apply '
+    } | Select-Object -First 1).Value
+    Assert-True ($applyCommand.Contains('"' + $commandInstallRoot + '\runtime\Invoke-PortableFolderIcons.ps1"')) 'registry command quotes stable runtime path'
+    Assert-True ($applyCommand.EndsWith(' -TargetPath "%1"')) 'registry passes target as a fixed argument'
+    Assert-Equal $false ($applyCommand.Contains('-Command')) 'registry never interpolates target into PowerShell code'
+    Assert-True (@($registryPlan | Where-Object { $_.Value -eq 'Repair Portable Folder Icons' }).Count -eq 1) 'registry includes Repair'
+    Assert-True (@($registryPlan | Where-Object { $_.Value -eq 'Uninstall Portable Folder Icons' }).Count -eq 1) 'registry includes Uninstall'
+    Assert-Throws {
+        Register-PfiContextMenu -Manifest $installedManifest -InstallRoot $installRoot `
+            -RegistryRoot 'HKCU:\Software\Classes\Directory\shell\ForeignTool' -WhatIf
+    } 'registration rejects foreign HKCU subtree'
+    $dryRun = @(Register-PfiContextMenu -Manifest $installedManifest -InstallRoot $installRoot `
+        -RegistryRoot $registryRoot -WhatIf)
+    Assert-Equal $registryPlan.Count $dryRun.Count 'dry-run registration returns the complete disposable registry plan'
 }
 finally {
     if (Test-Path -LiteralPath $testRoot) {
