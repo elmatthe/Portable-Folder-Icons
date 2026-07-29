@@ -33,6 +33,38 @@
 
 ### Fixed
 
+- Stopped Apply from deleting a generated ICO that Explorer may still be
+  resolving. Deleting it made the icon resolve to nothing, which Explorer
+  cached as "no customization", leaving the folder on the plain default icon
+  permanently. Every generated resource a folder has used is now retained
+  until Reset removes the customization and reclaims them all; Repair counts
+  them and never deletes them, because it cannot prove one is unreferenced.
+- Stopped the Explorer refresh from reporting success when it had reloaded
+  nothing. `RefreshSucceeded` previously came from the notification count
+  alone, so a run that matched an open parent view and failed to reload it
+  still reported success. It now requires every matched view to have been
+  reloaded, and reports whether a view was reloaded at all.
+- Stopped a failed away-and-back reload from stranding the Explorer view one
+  level above the folder. The return navigation now runs even when the
+  outbound leg fails or times out.
+- Replaced the unqualified "Apply completed successfully" dialog with one that
+  states what was done and explains that a folder still showing its previous
+  icon is Explorer serving a cached icon. Nothing in the product inspects
+  rendered pixels, so nothing claims they were verified.
+
+### Known limitations
+
+- With a warm Explorer icon cache, an already-open view can keep painting a
+  folder's previous custom icon after Apply. This was measured directly from
+  rendered pixels: the filesystem, attributes, generated ICO and Shell
+  resolution are all correct immediately, while Explorer serves its cached
+  mapping. Update-class Shell notifications, a view refresh, away-and-back
+  navigation, atomic `desktop.ini` replacement, forced item re-resolve via
+  `SHCNE_RMDIR`/`SHCNE_MKDIR`, a two-phase apply through the default icon, and
+  delays up to 15 seconds were each measured and none corrected it. Opening a
+  new Explorer window on the folder shows the current icon. Restarting
+  Explorer would clear the cache but is excluded by the project constraints.
+
 - Prevented reuse of a stale customized-folder system image-list entry by
   giving each Apply a unique folder-scoped ICO resource identity and fully
   navigating only the matching parent Explorer tab out and back. Navigation

@@ -50,12 +50,23 @@ function Invoke-PfiRepair {
     if (-not $SkipRegistry) {
         [void](Register-PfiContextMenu -Manifest $state.Manifest -InstallRoot $InstallRoot)
     }
+    # Generated per-folder resources are counted but deliberately NOT deleted.
+    # Whether a resource is still referenced can only be answered by reading the
+    # desktop.ini of every folder it was applied to, which Repair cannot
+    # enumerate. Deleting one that is still referenced makes the folder fall back
+    # to the plain default icon permanently, so retention is the safe default.
+    $generatedRoot = Join-Path (Join-Path $InstallRoot 'icons') 'applied'
+    $generatedResources = 0
+    if (Test-Path -LiteralPath $generatedRoot -PathType Container) {
+        $generatedResources = @(Get-ChildItem -LiteralPath $generatedRoot -File -Filter '*.ico').Count
+    }
     return [pscustomobject]@{
         Action = 'Repair'
         Runtime = 'Valid'
         ValidatedIcons = $state.ValidatedIcons
         Registry = if ($SkipRegistry) { 'Skipped' } else { 'Recreated' }
         ImportedRepositoryIcons = $false
+        GeneratedResources = $generatedResources
     }
 }
 

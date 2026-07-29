@@ -66,8 +66,16 @@ try {
         }
     }
     Add-Type -AssemblyName PresentationFramework
+    # This reports what was actually done, not what is on screen. Explorer caches
+    # a folder's icon resource process-wide and may keep drawing the previous
+    # icon for a while; that is a documented Explorer limitation, not a failure
+    # of the operation. Claiming "completed successfully" without qualification
+    # would assert something that has not been verified.
     $completionMessage = if ($null -ne $actionResult -and -not $actionResult.RefreshSucceeded) {
         ('{0} completed and the folder customization was saved, but Explorer could not be refreshed automatically. The icon may update after Explorer processes the change.' -f $Action)
+    }
+    elseif ($Action -eq 'Apply') {
+        "Apply completed. The folder customization was saved and the open parent view was reloaded.`n`nIf the folder still shows its previous icon, Explorer is serving a cached icon for it; the new icon appears once that cache is refreshed."
     }
     else {
         ('{0} completed successfully.' -f $Action)

@@ -432,7 +432,11 @@ try {
         $firstAppliedResource,
         [StringComparison]::OrdinalIgnoreCase
     )) 'different-icon apply receives a new resource identity'
-    Assert-Equal $false (Test-Path -LiteralPath $firstAppliedResource) 'superseded generated resource is removed safely'
+    # Explorer can still be resolving the previous IconResource when the next
+    # Apply lands. Deleting it there makes the folder fall back to the plain
+    # default icon permanently, so the superseded resource must survive.
+    Assert-True (Test-Path -LiteralPath $firstAppliedResource) 'superseded generated resource is retained for Explorer'
+    Assert-Equal $firstAppliedResource $secondRefreshApply.SupersededIconResource 'apply reports the resource it superseded'
     Assert-True (Test-Path -LiteralPath $unrelatedGeneratedResource) 'generated-resource cleanup preserves unrelated folder resources'
     Assert-True (([IO.File]::ReadAllText((Join-Path $specialFolder 'desktop.ini'))).Contains(
         ($secondRefreshApply.IconResource + ',0')
@@ -529,10 +533,157 @@ try {
         'final rapid color resource contains cache content with the requested hash'
     Assert-Equal $true ($postResetApply.Applied -and $rapidFinalApply.Applied) 'post-reset and rapid sequential applies complete'
 
+    # ---------------------------------------------------------------------
+    # Explorer icon-staleness regressions.
+    # These cover the defects found by measuring what Explorer actually paints:
+    # premature deletion of a resource Explorer still resolves, refresh success
+    # reported when nothing was reloaded, and a reload that strands the view.
+    # ---------------------------------------------------------------------
+    Assert-Equal 'C:\Icons\Blue.ico' (Get-PfiDesktopIniIconResourcePath "[.ShellClassInfo]`r`nIconResource=C:\Icons\Blue.ico,0`r`n") 'icon resource path is read back without its index'
+    Assert-Equal 'C:\Icons\No Index.ico' (Get-PfiDesktopIniIconResourcePath "[.ShellClassInfo]`r`nIconResource=C:\Icons\No Index.ico`r`n") 'icon resource path without an index is read back intact'
+    Assert-Equal '' (Get-PfiDesktopIniIconResourcePath "[.ShellClassInfo]`r`nInfoTip=None`r`n") 'absent icon resource reads back as empty'
+    Assert-Equal '' (Get-PfiDesktopIniIconResourcePath '') 'empty desktop.ini reads back as empty'
+
+    # Blue -> Red -> Reset -> Black, the required manual acceptance sequence,
+    # asserting resource retention and identity at every step.
+    $sequenceFolder = Join-Path $testRoot 'Sequence Target (üñî)'
+    [void](New-Item -ItemType Directory -Path $sequenceFolder)
+    $sequenceIni = Join-Path $sequenceFolder 'desktop.ini'
+    $sequenceEntries = @($installedManifest.entries | Where-Object validationState -eq 'Accepted')
+    $applyBlue = Invoke-PfiApply -TargetPath @($sequenceFolder) -IconHash $sequenceEntries[0].hash `
+        -InstallRoot $installRoot -SkipRefresh
+    Assert-Equal '' $applyBlue.SupersededIconResource 'first apply supersedes nothing'
+    $applyRed = Invoke-PfiApply -TargetPath @($sequenceFolder) -IconHash $sequenceEntries[1].hash `
+        -InstallRoot $installRoot -SkipRefresh
+    Assert-True (Test-Path -LiteralPath $applyBlue.IconResource) 'sequential apply retains the immediately superseded resource'
+    Assert-True (-not $applyRed.IconResource.Equals($applyBlue.IconResource, [StringComparison]::OrdinalIgnoreCase)) 'each apply produces a distinct resource identity'
+    $applyGreen = Invoke-PfiApply -TargetPath @($sequenceFolder) -IconHash $sequenceEntries[2].hash `
+        -InstallRoot $installRoot -SkipRefresh
+    Assert-True (Test-Path -LiteralPath $applyRed.IconResource) 'third apply retains the second resource'
+    # Explorer can lag several applies behind, so no generation is safe to
+    # reclaim while the folder is still customized.
+    Assert-True (Test-Path -LiteralPath $applyBlue.IconResource) 'resources more than one generation old are still retained'
+    Assert-True (([IO.File]::ReadAllText($sequenceIni)).Contains($applyGreen.IconResource + ',0')) 'desktop.ini references the newest resource'
+    $sequencePrefix = Get-PfiFolderResourcePrefix $sequenceFolder
+    $unrelatedBeforeReset = Join-Path (Join-Path (Join-Path $installRoot 'icons') 'applied') (
+        ('e' * 64) + '-' + [guid]::NewGuid().ToString('N') + '.ico'
+    )
+    Copy-Item -LiteralPath $validIcon -Destination $unrelatedBeforeReset
+    [void](Invoke-PfiReset -TargetPath @($sequenceFolder) -InstallRoot $installRoot -SkipRefresh)
+    # Reset is the point where reclaiming is safe: the customization is gone, so
+    # no resource can still be referenced.
+    Assert-Equal $false (Test-Path -LiteralPath $applyBlue.IconResource) 'reset reclaims the oldest resource owned by the folder'
+    Assert-Equal $false (Test-Path -LiteralPath $applyRed.IconResource) 'reset reclaims intermediate resources owned by the folder'
+    Assert-Equal $false (Test-Path -LiteralPath $applyGreen.IconResource) 'reset reclaims every resource owned by the folder'
+    Assert-Equal 0 (@(Get-ChildItem -LiteralPath (Join-Path (Join-Path $installRoot 'icons') 'applied') -File -Filter ($sequencePrefix + '*.ico')).Count) 'reset leaves no resource owned by the folder'
+    Assert-True (Test-Path -LiteralPath $unrelatedBeforeReset) 'reset preserves resources owned by other folders'
+    Assert-Equal $false (Test-Path -LiteralPath $sequenceIni) 'reset removes the owned-only desktop.ini'
+    $applyBlack = Invoke-PfiApply -TargetPath @($sequenceFolder) -IconHash $sequenceEntries[3].hash `
+        -InstallRoot $installRoot -SkipRefresh
+    Assert-True (([IO.File]::ReadAllText($sequenceIni)).Contains($applyBlack.IconResource + ',0')) 'apply after reset stores the newly requested icon'
+    Assert-Equal ([string]$sequenceEntries[3].hash) (Get-PfiSha256 $applyBlack.IconResource) 'apply after reset writes the requested ICO content'
+    Assert-True (([IO.File]::GetAttributes($sequenceFolder) -band [IO.FileAttributes]::ReadOnly) -ne 0) 'apply after reset restores the folder ReadOnly bit'
+
+    # Canonical per-folder hashing keeps one folder's cleanup away from another's.
+    $prefixA = Get-PfiFolderResourcePrefix 'C:\Parent\Child'
+    Assert-Equal $prefixA (Get-PfiFolderResourcePrefix 'C:\Parent\Child\') 'resource prefix ignores a trailing separator'
+    Assert-Equal $prefixA (Get-PfiFolderResourcePrefix 'C:\PARENT\CHILD') 'resource prefix is case canonical'
+    Assert-Equal $prefixA (Get-PfiFolderResourcePrefix 'C:\Parent\Other\..\Child') 'resource prefix canonicalizes traversal'
+    Assert-True (-not $prefixA.Equals((Get-PfiFolderResourcePrefix 'C:\Parent\Child2'), [StringComparison]::Ordinal)) 'distinct folders receive distinct resource prefixes'
+    Assert-True ($prefixA -match '^[a-f0-9]{64}$') 'resource prefix is a full SHA-256 hex digest'
+
+    # A refresh that matched a view but reloaded nothing must not report success.
+    $strandedWindow = New-TestExplorerWindow ((New-Object Uri(
+        ([IO.Path]::GetFullPath((Split-Path -Parent $sequenceFolder)) + '\')
+    )).AbsoluteUri) 303
+    $failingReload = { param($ExplorerWindow, $LocationUrl, $TemporaryLocationUrl, $ExpectedLocationPath, $TemporaryLocationPath)
+        throw 'simulated reload failure' }
+    $unreloadedRefresh = Send-PfiExplorerRefresh -FolderPath $sequenceFolder `
+        -DesktopIniChange Update -NotificationAction { param($EventId, $Flags, $Path, $TargetKind) } `
+        -ExplorerWindowsProvider { @($strandedWindow) } -FullViewRefreshAction $failingReload `
+        -WarningAction SilentlyContinue
+    Assert-Equal 1 $unreloadedRefresh.MatchedExplorerWindows 'the parent view is still matched when its reload fails'
+    Assert-Equal 0 $unreloadedRefresh.RefreshedExplorerWindows 'a failed reload is not counted as refreshed'
+    Assert-Equal $false $unreloadedRefresh.RefreshSucceeded 'refresh does not report success when a matched view was not reloaded'
+    Assert-Equal $false $unreloadedRefresh.ViewReloadPerformed 'no view reload is reported when none completed'
+
+    # With no view of the parent open there is nothing to reload; that is normal
+    # and must still be distinguishable from having reloaded something.
+    $noWindowRefresh = Send-PfiExplorerRefresh -FolderPath $sequenceFolder `
+        -DesktopIniChange Update -NotificationAction { param($EventId, $Flags, $Path, $TargetKind) } `
+        -ExplorerWindowsProvider { @() }
+    Assert-Equal 0 $noWindowRefresh.MatchedExplorerWindows 'no matching view is reported when the parent is not open'
+    Assert-Equal $true $noWindowRefresh.RefreshSucceeded 'notifications alone succeed when no view is open'
+    Assert-Equal $false $noWindowRefresh.ViewReloadPerformed 'no view reload is claimed when the parent is not open'
+
+    # The reload must leave the view at the original parent even when the
+    # outbound navigation fails, otherwise the tab is stranded one level up.
+    $strandTestWindow = New-TestExplorerWindow ((New-Object Uri(
+        ([IO.Path]::GetFullPath((Split-Path -Parent $sequenceFolder)) + '\')
+    )).AbsoluteUri) 404
+    $expectedReturnUrl = $strandTestWindow.LocationURL
+    $strandTestWindow | Add-Member -MemberType NoteProperty -Name OutboundAttempts -Value 0 -Force
+    $strandTestWindow | Add-Member -MemberType ScriptMethod -Name Navigate2 -Force -Value {
+        param($Url)
+        $this.Navigated = $true
+        $this.NavigatedUrl = [string]$Url
+        $this.NavigationHistory.Add([string]$Url)
+        $this.LocationURL = [string]$Url
+        # Fail only the outbound leg, the way a real navigation can time out.
+        if ($this.OutboundAttempts -eq 0) {
+            $this.OutboundAttempts = 1
+            throw 'simulated outbound navigation failure'
+        }
+    }
+    $strandRefresh = $null
+    try {
+        $strandRefresh = Send-PfiExplorerRefresh -FolderPath $sequenceFolder `
+            -DesktopIniChange Update -NotificationAction { param($EventId, $Flags, $Path, $TargetKind) } `
+            -ExplorerWindowsProvider { @($strandTestWindow) } -WarningAction SilentlyContinue
+    }
+    catch { }
+    Assert-Equal $expectedReturnUrl $strandTestWindow.LocationURL 'a failed outbound navigation still returns the view to the original parent'
+    Assert-Equal $false $strandRefresh.RefreshSucceeded 'a reload that failed midway is reported as unsuccessful'
+
+    # Repair must never delete generated resources: it cannot prove they are
+    # unreferenced, and deleting a referenced one breaks the folder for good.
+    $repairRetentionRoot = Join-Path (Join-Path $installRoot 'icons') 'applied'
+    $repairRetentionBefore = @(Get-ChildItem -LiteralPath $repairRetentionRoot -File -Filter '*.ico').Count
+    $repairRetention = Invoke-PfiRepair -InstallRoot $installRoot -SkipRegistry
+    Assert-Equal $repairRetentionBefore (@(Get-ChildItem -LiteralPath $repairRetentionRoot -File -Filter '*.ico').Count) 'repair retains every generated resource'
+    Assert-Equal $repairRetentionBefore $repairRetention.GeneratedResources 'repair reports the generated resource count it observed'
+
+    # PIDL lifetime: the notification path must not leak across a full refresh.
+    Assert-Equal 0 ([PortableFolderIcons.NativeMethods]::OutstandingPidls) 'no PIDL allocation is outstanding after refresh regressions'
+
     $dispatcherText = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\Windows\Invoke-PortableFolderIcons.ps1') -Raw
     Assert-True ($dispatcherText.IndexOf('$actionResult = Invoke-PfiApply') -lt
         $dispatcherText.IndexOf('[void][Windows.MessageBox]::Show(')) 'success dialog is ordered after Apply and refresh completion'
     Assert-True ($dispatcherText.Contains('but Explorer could not be refreshed automatically')) 'dispatcher distinguishes refresh warning from apply failure'
+    # The dispatcher may report what it did; it may not assert what is on screen,
+    # because nothing in the product verifies rendered pixels.
+    Assert-True ($dispatcherText.Contains('Explorer is serving a cached icon')) 'Apply completion explains a cached icon instead of claiming the icon changed'
+    Assert-Equal $false ($dispatcherText.Contains("'Apply completed successfully.'")) 'Apply completion does not claim unverified visual success'
+
+    # Constraints that must hold across the whole runtime.
+    $runtimeSources = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'scripts\Windows') -File -Filter '*.ps1')
+    foreach ($source in $runtimeSources) {
+        $sourceText = Get-Content -LiteralPath $source.FullName -Raw
+        Assert-Equal $false ($sourceText -match '(?i)Stop-Process\s+.*explorer') ('no Explorer process termination in ' + $source.Name)
+        Assert-Equal $false ($sourceText -match '(?i)taskkill') ('no taskkill in ' + $source.Name)
+        Assert-Equal $false ($sourceText -match '(?i)IconCache|thumbcache') ('no global icon-cache manipulation in ' + $source.Name)
+        Assert-Equal $false ($sourceText -match '(?i)#Requires\s+-RunAsAdministrator') ('no elevation requirement in ' + $source.Name)
+    }
+    # The apply/reset/refresh path must never pace itself with a delay: it waits
+    # on real conditions only. The uninstall cleanup helper is excluded because
+    # its sleep is a bounded poll for the parent process to exit, which is a real
+    # condition and cannot be expressed any other way from a detached process.
+    foreach ($source in @($runtimeSources | Where-Object { $_.Name -ne 'Cleanup-PortableFolderIcons.ps1' })) {
+        $sourceText = Get-Content -LiteralPath $source.FullName -Raw
+        Assert-Equal $false ($sourceText -match '(?i)Start-Sleep') ('no fixed timing delay in ' + $source.Name)
+    }
+    $cleanupText = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\Windows\Cleanup-PortableFolderIcons.ps1') -Raw
+    Assert-True ($cleanupText -match '(?s)for \(\$attempt.*?Get-Process -Id \$ParentProcessId.*?break') 'uninstall cleanup sleep is a bounded poll on parent process exit'
     $integrationText = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Integration.ps1') -Raw
     Assert-True ($integrationText.Contains("if (`$Action -notin @('Apply', 'Reset'))")) `
         'Apply and Reset commands keep a visible progress terminal'

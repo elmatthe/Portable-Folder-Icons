@@ -274,10 +274,19 @@ namespace PortableFolderIcons {
             # A same-URL Navigate2 can be optimized away by tabbed Explorer.
             # Navigate this exact tab one level out and back, waiting on the
             # COM object's real URL and Busy state rather than a fixed delay.
-            $ExplorerWindow.Navigate2($TemporaryLocationUrl)
-            & $waitForLocation $TemporaryLocationPath
-            $ExplorerWindow.Navigate2($LocationUrl)
-            & $waitForLocation $ExpectedLocationPath
+            #
+            # The return leg is in a finally block: if the outbound navigation
+            # fails or times out, the tab must still be brought back. Without
+            # this the view is left stranded at the temporary parent, which
+            # violates the requirement that it finish at the original folder.
+            try {
+                $ExplorerWindow.Navigate2($TemporaryLocationUrl)
+                & $waitForLocation $TemporaryLocationPath
+            }
+            finally {
+                $ExplorerWindow.Navigate2($LocationUrl)
+                & $waitForLocation $ExpectedLocationPath
+            }
         }
     }
 
@@ -392,7 +401,17 @@ namespace PortableFolderIcons {
         RefreshedExplorerWindows = $refreshedWindows
         RefreshedWindowHandles = $refreshedWindowHandles.ToArray()
         ViewRefreshMechanism = 'NavigateAwayAndBack'
-        RefreshSucceeded = ($issued -eq $notifications.Count -and $warnings.Count -eq 0)
+        # True only when every matched view was actually reloaded. Previously
+        # this reported success purely from the notification count, so a run
+        # that reloaded nothing still claimed the refresh had succeeded.
+        RefreshSucceeded = (
+            $issued -eq $notifications.Count -and
+            $warnings.Count -eq 0 -and
+            $refreshedWindows -eq $matchedWindows
+        )
+        # Whether an open view of the parent was found and reloaded at all.
+        # Zero is normal when the parent folder is not open in Explorer.
+        ViewReloadPerformed = ($refreshedWindows -gt 0)
         Warnings = $warnings.ToArray()
     }
 }
@@ -443,21 +462,27 @@ function Remove-PfiObsoleteAppliedResources {
     param(
         [Parameter(Mandatory = $true)][string]$FolderPath,
         [Parameter(Mandatory = $true)][string]$InstallRoot,
-        [string]$KeepPath
+        [string[]]$KeepPath
     )
 
     $generatedRoot = Join-Path (Join-Path $InstallRoot 'icons') 'applied'
     if (-not (Test-Path -LiteralPath $generatedRoot -PathType Container)) { return 0 }
+    $keep = New-Object System.Collections.Generic.List[string]
+    foreach ($path in @($KeepPath)) {
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        $keep.Add([IO.Path]::GetFullPath($path))
+    }
     $prefix = (Get-PfiFolderResourcePrefix $FolderPath) + '-'
     $removed = 0
     foreach ($candidate in @(Get-ChildItem -LiteralPath $generatedRoot -File -Filter ($prefix + '*.ico'))) {
-        if (-not [string]::IsNullOrWhiteSpace($KeepPath) -and
-            $candidate.FullName.Equals(
-                [IO.Path]::GetFullPath($KeepPath),
-                [StringComparison]::OrdinalIgnoreCase
-            )) {
-            continue
+        $retain = $false
+        foreach ($path in $keep) {
+            if ($candidate.FullName.Equals($path, [StringComparison]::OrdinalIgnoreCase)) {
+                $retain = $true
+                break
+            }
         }
+        if ($retain) { continue }
         Remove-Item -LiteralPath $candidate.FullName -Force
         $removed++
     }
@@ -495,6 +520,12 @@ function Invoke-PfiApply {
     $originalFolderAttributes = [IO.File]::GetAttributes($folder)
     $existing = Get-PfiExistingDesktopIni $folder
     Assert-PfiDesktopIniWellFormed $existing
+    # Explorer keeps resolving the PREVIOUS IconResource path for some time after
+    # desktop.ini changes. Deleting that file immediately makes the icon resolve
+    # to nothing, which Explorer then caches as "no customization" -- the folder
+    # falls back to the plain default icon and does not recover. Retaining the
+    # superseded resource for one more generation avoids that failure entirely.
+    $supersededResource = Get-PfiDesktopIniIconResourcePath $existing
     Write-Host ('[1/4] Validated cached icon: {0}' -f ([IO.Path]::GetFileName($cachedPath)))
     $appliedResource = New-PfiAppliedIconResource $folder $cachedPath $InstallRoot
     $updated = Set-PfiDesktopIniIconContent $existing ($appliedResource + ',0')
@@ -532,13 +563,20 @@ function Invoke-PfiApply {
             $refresh = & $RefreshAction $folder $desktopIniChange
         }
     }
-    [void](Remove-PfiObsoleteAppliedResources $folder $InstallRoot -KeepPath $appliedResource)
+    # Deliberately no cleanup here. Explorer can lag several applies behind what
+    # desktop.ini says, so there is no generation count that is safe to reclaim:
+    # measuring showed a view still rendering the FIRST colour after two further
+    # applies, and deleting that resource dropped the folder to the plain default
+    # icon permanently. Every resource a folder has ever used is therefore kept
+    # until Reset removes the customization and reclaims them all. The files are
+    # a few hundred bytes each, and Repair reports how many exist.
     Write-Host '[4/4] Apply and targeted Explorer refresh completed.'
     return [pscustomobject]@{
         Action = 'Apply'
         Folder = $folder
         IconHash = $hash
         IconResource = $appliedResource
+        SupersededIconResource = $supersededResource
         Applied = $true
         RefreshSucceeded = ($SkipRefresh -or $null -eq $refresh -or $refresh.RefreshSucceeded)
         Refresh = $refresh

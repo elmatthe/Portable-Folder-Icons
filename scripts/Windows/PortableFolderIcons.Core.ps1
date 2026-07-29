@@ -360,3 +360,26 @@ function Reset-PfiDesktopIniIconContent {
     if ($lines.Count -eq 0) { return '' }
     return (($lines -join "`r`n") + "`r`n")
 }
+
+function Get-PfiDesktopIniIconResourcePath {
+    <#
+        Returns the file path currently referenced by IconResource, without the
+        trailing ',<index>', or '' when there is none.
+
+        Apply needs this to know which generated resource Explorer may still be
+        rendering from, so that resource can be retained rather than deleted.
+    #>
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$Content)
+
+    foreach ($line in [regex]::Split([string]$Content, '\r\n|\n|\r')) {
+        if ($line -match '^\s*IconResource\s*=\s*(.+?)\s*$') {
+            $value = $matches[1]
+            # Strip the icon index, but not a drive colon (for example 'C:\x.ico,0').
+            $separator = $value.LastIndexOf(',')
+            if ($separator -gt 0) { $value = $value.Substring(0, $separator) }
+            return $value.Trim()
+        }
+    }
+    return ''
+}

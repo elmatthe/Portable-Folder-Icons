@@ -2,14 +2,78 @@
 
 ## Current Focus
 
-All implementation phases and the bug hunt are complete on
+All implementation phases are complete on
 `feature/v0.1.0-portable-folder-icons`. Setup and the repaired classic cascade
-passed manual testing. Three notification/refresh repairs failed manual
-testing because the open Windows 11 parent view retained the customized
-folder's system image-list entry. Apply now uses a unique folder-scoped ICO
-resource and navigates only the matching tab out and back with completion
-tracking. This is verified automatically and against the installed runtime;
-the rendered result still requires user acceptance before any merge.
+passed manual testing.
+
+The fifth investigation into the stale-icon defect measured what Explorer
+**actually paints**, by capturing the live window with `PrintWindow` and
+classifying the folder item's pixels, rather than inferring success from
+notifications and Shell queries. That produced a definite diagnosis and closed
+two real defects, but it also established a genuine Windows limitation:
+
+- **Fixed.** Apply no longer deletes a generated ICO that Explorer may still be
+  resolving. That deletion was the cause of the folder falling back to the
+  plain default icon permanently.
+- **Fixed.** Refresh no longer reports success when a matched view was not
+  reloaded, and a failed reload can no longer strand the view one level up.
+- **Not solved, and not solvable under the current constraints.** Explorer
+  caches a folder's icon resource process-wide. When that cache is warm, no
+  supported non-invasive mechanism was found that makes an already-open view
+  repaint a *changed* custom icon promptly. See "Explorer icon cache" below.
+
+The rendered result still requires user acceptance before any merge.
+
+---
+
+## Explorer icon cache — measured limitation
+
+Method: capture the Explorer window with `PrintWindow(PW_RENDERFULLCONTENT)`
+and classify the pixels in the folder item's icon rectangle. This is the only
+evidence in this document that reflects what a user actually sees; everything
+else proves internal state.
+
+**What is correct immediately, every time, after Apply:** `desktop.ini`
+contents, folder and `desktop.ini` attributes, the generated ICO on disk and
+its hash, `SHGFI_ICONLOCATION`, and `SHGFI_SYSICONINDEX` queried from a fresh
+process. None of these predict what is painted.
+
+**What is stale:** Explorer's own cached mapping from the folder to its icon
+resource, held process-wide.
+
+**Measured findings:**
+
+- Update-class notifications (`SHCNE_UPDATEITEM`, `SHCNE_UPDATEDIR` on either
+  the parent or the folder itself, `SHCNE_ATTRIBUTES`, `SHCNE_UPDATEIMAGE`,
+  `SHUpdateImage`) never cause Explorer to re-read `desktop.ini`.
+- `SHCNE_RMDIR` + `SHCNE_MKDIR` on the folder's PIDL *does* force a full item
+  re-resolve — it changed the painted icon within 300 ms in several runs — but
+  the re-resolve reads the same stale cache, so it returns the old icon.
+- Deleting the superseded ICO made the re-resolve find nothing, which Explorer
+  cached as "no customization". The folder then showed the plain default icon
+  and did not recover: 8 forced re-resolves over 60 s never restored it. This
+  is the state reported from the field. Retaining the resource removes it.
+- The following did **not** produce a correct repaint of a changed custom icon
+  in an already-open view: delays up to 15 s; a view refresh (the F5
+  equivalent); notify-then-identity-change ordered under `SHCNF_FLUSH`; atomic
+  `desktop.ini` replacement instead of in-place truncation; and a two-phase
+  apply routed through the default icon with a forced re-resolve on each leg.
+- **A newly opened Explorer window resolves the current icon correctly.**
+  Verified: a stuck pre-existing view painted the default icon while a window
+  opened seconds later on the same folder painted the current colour. This is
+  the practical workaround, and it only works because resources are now
+  retained — previously the ICO was gone, so a fresh view was also correct in
+  showing the default.
+
+**Consequence for the product.** Apply reports what it did, not what is on
+screen. The completion dialog states that a folder still showing its previous
+icon is Explorer serving a cached icon. No code claims rendered pixels were
+verified, because nothing in the product inspects them.
+
+**Rejected as out of scope by the stated constraints:** restarting or killing
+`explorer.exe`, deleting the global icon cache, and pacing the operation with
+fixed delays. Restarting Explorer is the known-reliable way to clear this
+cache; it is forbidden here and was not implemented.
 
 ---
 
@@ -17,7 +81,10 @@ the rendered result still requires user acceptance before any merge.
 
 | # | Severity | File | Description | Status | Found by |
 |---|----------|------|-------------|--------|----------|
-| 1 | Critical | Explorer refresh | Notifications, ordinary refresh, and same-URL navigation all left the customized folder on one stale system image-list slot. Apply now creates a unique folder-scoped ICO resource and navigates the exact matching tab out and back, waiting for both canonical locations to complete. | Fixed / awaiting fourth user Step 7 retest | User |
+| 1 | Critical | Apply / generated resources | Apply deleted the superseded ICO while Explorer was still resolving it. The icon then resolved to nothing, Explorer cached "no customization", and the folder showed the plain default icon permanently. Every resource a folder has used is now retained until Reset reclaims them. | Fixed / awaiting user retest | Claude |
+| 1a | Known limitation | Explorer icon cache | With a warm cache, an already-open Explorer view keeps painting the previous custom icon after Apply. No supported non-invasive mechanism was found that changes this; see "Explorer icon cache" above for the measured evidence. Opening a new window on the folder shows the current icon. | Documented, not solvable under current constraints | Claude |
+| 1b | Major | Explorer refresh reporting | `RefreshSucceeded` was computed only from the notification count, so a run that matched a view and reloaded none of them still reported success. It now requires every matched view to have been reloaded, and reports `ViewReloadPerformed` separately. | Fixed | Claude |
+| 1c | Major | Explorer refresh navigation | If the outbound leg of the away-and-back reload failed or timed out, the view was left stranded at the temporary parent. The return leg is now in a `finally` block. | Fixed | Claude |
 | 2 | Critical | Registry integration | The parent stored `ExtendedSubCommandsKey` as a child key instead of a REG_SZ reference, so Explorer treated **Folder Icons** as a plain executable verb; setup also left ten recognized prototype `FolderColor_*` verbs in place. | Fixed / manual retest passed | User |
 | 3 | Critical | `Setup_and_Run-Portable-Folder-Icons.bat` | Passing the trailing-backslash checkout root as `"%~dp0"` caused native PowerShell argument parsing to retain a closing quote in the value sent to `GetFullPath`. | Fixed / manual retest passed | User |
 | 4 | Minor | Explorer UI | The same-location parent-view reload is intentionally stronger and may reset that view's selection or scroll position. Actual icon rendering remains a user-only visual assertion. | Mitigated / manual QA | Codex |
@@ -26,6 +93,47 @@ the rendered result still requires user acceptance before any merge.
 ---
 
 ## Work Log (newest first)
+
+- 2026-07-29 — Fifth investigation. Built the missing instrument first: a
+  `PrintWindow(PW_RENDERFULLCONTENT)` capture of the live Explorer window plus
+  a pixel classifier for the folder item's icon rectangle, with a validity
+  guard that fails loudly when the crop stops covering the icon. An earlier
+  run had been silently invalidated by a stale crop, so this guard is load
+  bearing. With rendered pixels as the evidence, every layer previously cited
+  as proof — `desktop.ini`, attributes, ICO hash, `SHGFI_ICONLOCATION`,
+  `SHGFI_SYSICONINDEX` from a fresh process — was correct immediately while
+  Explorer painted the old icon, which means all four previous repairs
+  targeted a layer that was never broken.
+
+  The two-phase transition selected as the way forward was tested and
+  **failed**: phase 1 repaints correctly, phase 2 does not, at 0 ms and at
+  1500 ms between phases. The system image-list index model it was built on
+  was not the real mechanism.
+
+  Isolating the write style from the resource cleanup separated two distinct
+  failure signatures: in-place write plus deletion produced the sticky plain
+  default icon, whereas the same write with the resource retained produced
+  merely the previous colour. That identified premature deletion as the cause
+  of the unrecoverable state, confirming the standing hypothesis about
+  generated-resource cleanup. A first attempt retained only one generation and
+  still regressed, because a live view was observed lagging two applies behind
+  and its resource was reclaimed underneath it; all resources for a folder are
+  therefore retained until Reset.
+
+  `SHCNE_RMDIR` + `SHCNE_MKDIR` was shown to genuinely force a full item
+  re-resolve, unlike every update-class event tried before, but it reads the
+  same stale cache and so does not fix a changed custom icon. Delays to 15 s,
+  a view refresh, `SHCNF_FLUSH` ordering, atomic `desktop.ini` replacement and
+  the two-phase route were all measured and all failed. The limitation is
+  documented rather than papered over. A fresh Explorer window was verified to
+  paint the current colour while a stuck view painted the default, which is
+  the workaround and is only possible now that resources survive.
+
+  Also fixed: `RefreshSucceeded` no longer reports success when a matched view
+  was not reloaded, and the away-and-back reload returns the view to the
+  original parent even when the outbound leg fails. Suite is 235 passing,
+  `verify.ps1` RESULT: PASS including all ten ICOs and the Windows PowerShell
+  5.1 gate, exercised against the reinstalled runtime. — Claude
 
 - 2026-07-28 — Manual acceptance after `c17e663` failed: Blue, Red, and
   post-Reset Black remained stale while Reset was immediate. Installed runtime
