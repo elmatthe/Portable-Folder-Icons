@@ -42,6 +42,8 @@ files/logs/
 files/test-logs/
 files/temp/
 files/output/
+# Local source screenshots used to prepare sanitized README assets.
+files/screenshot-images-for-use/
 *.log
 
 # OS/editor cruft

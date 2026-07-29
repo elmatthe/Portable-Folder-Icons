@@ -1,0 +1,61 @@
+# Portable Folder Icons project metadata and setup configuration.
+
+[settings]
+# false keeps Apply/Reset silent; true shows their diagnostic terminal and result dialog.
+developer_mode = false
+
+[project]
+name = "Portable-Folder-Icons"
+display_name = "Portable Folder Icons"
+version = "0.1.0"
+description = "Current-user Windows folder-icon context menu with a stable local cache."
+author = "elmatthe"
+license = "MIT"
+
+[paths]
+scripts = "scripts"
+files = "files"
+tests = "files/tests"
+test_logs = "files/test-logs"
+source_icons = "files/ICO-Files"
+installed_root = "%LOCALAPPDATA%/Portable-Folder-Icons"
+
+[platform]
+windows = true
+macos = false
+linux = false
+minimum_windows = "10"
+minimum_windows_powershell = "5.1"
+
+[runtime]
+language = "Windows PowerShell"
+entry_point = "scripts/Windows/Install-PortableFolderIcons.ps1"
+launcher = "Setup_and_Run-Portable-Folder-Icons.bat"
+requires_admin = false
+requires_network = false
+requires_python = false
+
+[features]
+classic_context_menu = true
+single_selection = true
+stable_hashed_icon_cache = true
+explorer_restart = false
+telemetry = false
+
+[verification]
+entry_point = "scripts/verify.ps1"
+command = "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\verify.ps1"
+require_changelog = true
+require_briefing = true
+
+[release]
+create_git_tag = true
+generate_release_notes = true
+run_verify_before_release = true
+
+[developer]
+workspace = "AI-WORKSPACE.md"
+briefing = "md-instructions/Briefing.md"
+changelog = "md-instructions/Changelog.md"
+decisions = "md-instructions/Decisions.md"
+handoff = "md-instructions/Handoff.md"
