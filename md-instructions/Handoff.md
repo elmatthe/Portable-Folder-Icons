@@ -19,6 +19,14 @@ visible in both modes. Setup persists the strict Boolean in installed
 it. This new Developer Mode behavior still requires manual acceptance before
 merge.
 
+The first manual Developer Mode test found one remaining normal-mode defect:
+`powershell.exe -WindowStyle Hidden` flashed a console before PowerShell could
+hide it. Normal Apply/Reset now route through the installed
+`Invoke-PortableFolderIcons.Hidden.vbs` using `wscript.exe`; the launcher
+creates no console, waits for the dispatcher, and transports the selected path
+as UTF-16 hex. Developer Mode retains the direct visible PowerShell command.
+This correction is automated-test complete but awaits the user's visual retest.
+
 The fifth investigation into the stale-icon defect measured what Explorer
 **actually paints**, by capturing the live window with `PrintWindow` and
 classifying the folder item's pixels, rather than inferring success from
@@ -107,6 +115,15 @@ cache; it is forbidden here and was not implemented.
 ---
 
 ## Work Log (newest first)
+
+- 2026-07-29 — Corrected the normal-mode console flash found during manual
+  acceptance. Added and staged `Invoke-PortableFolderIcons.Hidden.vbs`, changed
+  only normal Apply/Reset registry commands to use `wscript.exe`, added strict
+  UTF-16-hex target decoding to the dispatcher, required the launcher during
+  Repair validation, and expanded command, lifecycle, special-character, and
+  windowless-launch regression coverage. Updated README, Briefing, Changelog,
+  Decisions, and Handoff. Developer Mode remains unmerged pending visual
+  confirmation that normal mode produces no terminal at all.
 
 - 2026-07-29 — Public-release preparation. Added strict default-false
   Developer Mode parsing and staged installed settings; normal Apply/Reset

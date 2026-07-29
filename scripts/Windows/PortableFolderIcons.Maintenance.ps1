@@ -7,6 +7,7 @@ function Test-PfiInstalledRuntime {
     $requiredScripts = @(
         'Cleanup-PortableFolderIcons.ps1',
         'Install-PortableFolderIcons.ps1',
+        'Invoke-PortableFolderIcons.Hidden.vbs',
         'Invoke-PortableFolderIcons.ps1',
         'PortableFolderIcons.Actions.ps1',
         'PortableFolderIcons.Core.ps1',

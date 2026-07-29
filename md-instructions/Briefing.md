@@ -39,8 +39,9 @@ rendered-resource identity.
 - A single-selection **Folder Icons** classic submenu with Apply, Reset,
   Repair, and Uninstall actions.
 - Repository-independent installed runtime and repair operation.
-- Default-silent Apply/Reset commands, with visible errors in every mode and
-  opt-in Developer Mode progress/completion UI.
+- Default-silent Apply/Reset commands routed through an installed `wscript.exe`
+  launcher that creates no console window, with visible errors in every mode
+  and opt-in Developer Mode progress/completion UI.
 - Targeted Shell notification and parent-view refresh without restarting
   Explorer or clearing the global icon cache.
 - Pure PowerShell verification with no admin, Python, package, or network

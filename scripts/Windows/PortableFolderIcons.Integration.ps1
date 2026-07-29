@@ -55,8 +55,30 @@ function New-PfiActionCommand {
         [string]$Action,
         [string]$IconHash,
         [switch]$IncludeTarget,
-        [bool]$DeveloperMode = $false
+        [bool]$DeveloperMode = $false,
+        [string]$HiddenLauncherPath,
+        [string]$WScriptPath = (Join-Path $env:SystemRoot 'System32\wscript.exe')
     )
+
+    if ($Action -in @('Apply', 'Reset') -and -not $DeveloperMode) {
+        if ([string]::IsNullOrWhiteSpace($HiddenLauncherPath)) {
+            throw 'The windowless action launcher path is required in normal mode.'
+        }
+        $hiddenParts = @(
+            (ConvertTo-PfiQuotedCommandArgument $WScriptPath),
+            (ConvertTo-PfiQuotedCommandArgument $HiddenLauncherPath),
+            '-Action',
+            $Action
+        )
+        if (-not [string]::IsNullOrWhiteSpace($IconHash)) {
+            if ($IconHash -notmatch '^[a-fA-F0-9]{64}$') {
+                throw 'Icon identity must be a full SHA-256 hash.'
+            }
+            $hiddenParts += @('-IconHash', $IconHash.ToLowerInvariant())
+        }
+        if ($IncludeTarget) { $hiddenParts += @('-TargetPath', '"%1"') }
+        return ($hiddenParts -join ' ')
+    }
 
     $parts = @(
         (ConvertTo-PfiQuotedCommandArgument $PowerShellPath),
@@ -68,7 +90,7 @@ function New-PfiActionCommand {
         '-Action',
         $Action
     )
-    if ($Action -notin @('Apply', 'Reset') -or -not $DeveloperMode) {
+    if ($Action -notin @('Apply', 'Reset')) {
         $parts = @($parts[0..2]) + @('-WindowStyle Hidden') + @($parts[3..($parts.Count - 1)])
     }
     if (-not [string]::IsNullOrWhiteSpace($IconHash)) {
@@ -124,6 +146,7 @@ function Get-PfiRegistryPlan {
         throw 'The submenu storage path does not match the HKCR-relative parent reference.'
     }
     $runtimeScript = Join-Path (Join-Path $InstallRoot 'runtime') 'Invoke-PortableFolderIcons.ps1'
+    $hiddenLauncher = Join-Path (Join-Path $InstallRoot 'runtime') 'Invoke-PortableFolderIcons.Hidden.vbs'
     $subcommandsShell = Join-Path $SubcommandsRoot 'shell'
     $plan = New-Object System.Collections.Generic.List[object]
 
@@ -145,7 +168,8 @@ function Get-PfiRegistryPlan {
         $verbName = 'Icon_{0:D4}_{1}' -f $ordinal, ([string]$entry.hash).ToLowerInvariant()
         $verbPath = Join-Path $subcommandsShell $verbName
         $cachedIcon = Join-Path (Join-Path $InstallRoot 'icons') ([string]$entry.cachedFilename)
-        $command = New-PfiActionCommand $PowerShellPath $runtimeScript Apply ([string]$entry.hash) -IncludeTarget -DeveloperMode $DeveloperMode
+        $command = New-PfiActionCommand $PowerShellPath $runtimeScript Apply ([string]$entry.hash) `
+            -IncludeTarget -DeveloperMode $DeveloperMode -HiddenLauncherPath $hiddenLauncher
         $plan.Add((New-PfiRegistryValue $verbPath 'MUIVerb' ([string]$entry.menuLabel)))
         $plan.Add((New-PfiRegistryValue $verbPath 'Icon' ($cachedIcon + ',0')))
         $plan.Add((New-PfiRegistryValue (Join-Path $verbPath 'command') '' $command))
@@ -155,7 +179,8 @@ function Get-PfiRegistryPlan {
     $plan.Add((New-PfiRegistryValue $resetPath 'MUIVerb' 'Reset to Default'))
     $plan.Add((New-PfiRegistryValue $resetPath 'CommandFlags' 32 'DWord'))
     $plan.Add((New-PfiRegistryValue (Join-Path $resetPath 'command') '' (
-        New-PfiActionCommand $PowerShellPath $runtimeScript Reset -IncludeTarget -DeveloperMode $DeveloperMode
+        New-PfiActionCommand $PowerShellPath $runtimeScript Reset -IncludeTarget `
+            -DeveloperMode $DeveloperMode -HiddenLauncherPath $hiddenLauncher
     )))
 
     $repairPath = Join-Path $subcommandsShell 'Utility_0200_Repair'

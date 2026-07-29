@@ -90,6 +90,7 @@ try {
     $requiredRuntime = @(
         'Cleanup-PortableFolderIcons.ps1',
         'Install-PortableFolderIcons.ps1',
+        'Invoke-PortableFolderIcons.Hidden.vbs',
         'Invoke-PortableFolderIcons.ps1',
         'PortableFolderIcons.Actions.ps1',
         'PortableFolderIcons.Core.ps1',
@@ -97,12 +98,13 @@ try {
         'PortableFolderIcons.Maintenance.ps1'
     )
     foreach ($requiredName in $requiredRuntime) {
-        if ($requiredName -notin @($runtimeSources.Name)) {
+        if (-not (Test-Path -LiteralPath (Join-Path $sourceScripts $requiredName) -PathType Leaf)) {
             throw "The staged runtime is incomplete: $requiredName is missing."
         }
     }
     foreach ($requiredName in $requiredRuntime) {
-        $source = $runtimeSources | Where-Object Name -eq $requiredName | Select-Object -First 1
+        $source = Get-Item -LiteralPath (Join-Path $sourceScripts $requiredName) -ErrorAction SilentlyContinue
+        if ($null -eq $source) { throw "The staged runtime is incomplete: $requiredName is missing." }
         Copy-Item -LiteralPath $source.FullName -Destination (Join-Path $stageRuntime $source.Name)
     }
     foreach ($scriptFile in @(Get-ChildItem -LiteralPath $stageRuntime -Filter '*.ps1' -File)) {

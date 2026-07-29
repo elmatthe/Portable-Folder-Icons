@@ -4,7 +4,8 @@ param(
     [ValidateSet('Apply', 'Reset', 'Repair', 'Uninstall')]
     [string]$Action,
     [string]$IconHash,
-    [string[]]$TargetPath
+    [string[]]$TargetPath,
+    [string]$TargetPathHex
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,6 +18,19 @@ $installRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'PortableFolderIcons.Maintenance.ps1')
 
 try {
+    if (-not [string]::IsNullOrEmpty($TargetPathHex)) {
+        if ($TargetPathHex -notmatch '^(?:[0-9A-Fa-f]{4})+$') {
+            throw 'The windowless launcher supplied an invalid target path.'
+        }
+        $characters = New-Object char[] ($TargetPathHex.Length / 4)
+        for ($index = 0; $index -lt $characters.Length; $index++) {
+            $characters[$index] = [char][Convert]::ToUInt16(
+                $TargetPathHex.Substring($index * 4, 4),
+                16
+            )
+        }
+        $TargetPath = -join $characters
+    }
     $installedSettings = Read-PfiInstalledSettings (Join-Path $installRoot 'settings.json')
     $developerMode = [bool]$installedSettings.developerMode
     $actionResult = $null

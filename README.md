@@ -57,8 +57,9 @@ Only redistribute custom icons when you have permission to do so.
 
 ## Developer Mode
 
-Normal operation is silent: Apply and Reset run in a hidden PowerShell window
-and show no success dialog. Errors still display a useful dialog.
+Normal operation is silent: Apply and Reset use the installed windowless
+launcher, create no terminal window, and show no success dialog. Errors still
+display a useful dialog.
 
 To see progress and the completion or warning dialog during diagnosis, edit
 `config.toml` before running setup:

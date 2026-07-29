@@ -36,6 +36,11 @@
 
 ### Fixed
 
+- Eliminated the brief PowerShell-console flash in normal mode by routing Apply
+  and Reset through an installed windowless Windows Script Host launcher.
+  Developer Mode continues to invoke PowerShell visibly, and target paths are
+  transported to the dispatcher as UTF-16 hex to preserve Unicode and
+  shell-sensitive characters.
 - Corrected batch-to-PowerShell repository-root quoting so checkout paths with
   spaces or Unicode do not acquire an illegal trailing quote.
 - Repaired the classic cascade by using a valid `ExtendedSubCommandsKey`

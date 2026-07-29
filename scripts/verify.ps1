@@ -52,6 +52,7 @@ $required = @(
     'scripts\verify.ps1'
     'scripts\Windows\Cleanup-PortableFolderIcons.ps1'
     'scripts\Windows\Install-PortableFolderIcons.ps1'
+    'scripts\Windows\Invoke-PortableFolderIcons.Hidden.vbs'
     'scripts\Windows\Invoke-PortableFolderIcons.ps1'
     'scripts\Windows\PortableFolderIcons.Actions.ps1'
     'scripts\Windows\PortableFolderIcons.Core.ps1'
@@ -152,6 +153,9 @@ else {
 
 $shippedFiles = @(
     Get-ChildItem -LiteralPath (Join-Path $repoRoot 'scripts\Windows') -Filter '*.ps1' -File
+)
+$shippedFiles += Get-Item -LiteralPath (
+    Join-Path $repoRoot 'scripts\Windows\Invoke-PortableFolderIcons.Hidden.vbs'
 )
 $shippedFiles += Get-Item -LiteralPath (Join-Path $repoRoot 'Setup_and_Run-Portable-Folder-Icons.bat')
 $shippedText = ($shippedFiles | ForEach-Object {

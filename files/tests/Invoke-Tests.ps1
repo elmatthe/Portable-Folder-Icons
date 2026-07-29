@@ -245,6 +245,8 @@ try {
     [void](New-Item -ItemType Directory -Path (Join-Path $configurationRepo 'files\ICO-Files') -Force)
     Copy-Item -Path (Join-Path $repoRoot 'scripts\Windows\*.ps1') `
         -Destination (Join-Path $configurationRepo 'scripts\Windows')
+    Copy-Item -Path (Join-Path $repoRoot 'scripts\Windows\*.vbs') `
+        -Destination (Join-Path $configurationRepo 'scripts\Windows')
     Copy-Item -Path (Join-Path $repoRoot 'files\ICO-Files\*.ico') `
         -Destination (Join-Path $configurationRepo 'files\ICO-Files')
     [IO.File]::WriteAllText(
@@ -299,14 +301,19 @@ try {
     $applyCommand = ($registryPlan | Where-Object {
         $_.Name -eq '' -and $_.Value -match ' -Action Apply '
     } | Select-Object -First 1).Value
-    Assert-True ($applyCommand.Contains('"' + $commandInstallRoot + '\runtime\Invoke-PortableFolderIcons.ps1"')) 'registry command quotes stable runtime path'
+    Assert-True ($applyCommand.Contains('"' + $commandInstallRoot + '\runtime\Invoke-PortableFolderIcons.Hidden.vbs"')) `
+        'normal registry command quotes installed windowless launcher path'
+    Assert-True ($applyCommand -match '(?i)^"[A-Z]:\\Windows\\System32\\wscript\.exe" ') `
+        'normal Apply uses windowless Windows Script Host'
     Assert-True ($applyCommand.EndsWith(' -TargetPath "%1"')) 'registry passes target as a fixed argument'
-    Assert-Equal $false ($applyCommand.Contains('-Command')) 'registry never interpolates target into PowerShell code'
-    Assert-True ($applyCommand.Contains('-WindowStyle Hidden')) 'normal mode hides Apply PowerShell window'
+    Assert-Equal $false ($applyCommand.Contains('powershell.exe')) 'normal Apply does not create a PowerShell console process directly'
     $normalResetCommand = ($registryPlan | Where-Object {
         $_.Name -eq '' -and $_.Value -match ' -Action Reset '
     }).Value
-    Assert-True ($normalResetCommand.Contains('-WindowStyle Hidden')) 'normal mode hides Reset PowerShell window'
+    Assert-True ($normalResetCommand.Contains('Invoke-PortableFolderIcons.Hidden.vbs')) `
+        'normal Reset uses the windowless launcher'
+    Assert-Equal $false ($normalResetCommand.Contains('powershell.exe')) `
+        'normal Reset does not create a PowerShell console process directly'
     $developerPlan = @(Get-PfiRegistryPlan -Manifest $installedManifest `
         -InstallRoot $commandInstallRoot -RegistryRoot $registryRoot `
         -SubcommandsRoot $subcommandsRoot -SubcommandsReference $subcommandsReference `
@@ -333,10 +340,15 @@ try {
         -SubcommandsReference $subcommandsReference)
     $installedCommands = @($installedRegistryPlan | Where-Object Name -eq '' | Select-Object -ExpandProperty Value)
     Assert-Equal 13 $installedCommands.Count 'icon and utility actions each have one command'
-    Assert-Equal 13 @($installedCommands | Where-Object {
+    Assert-Equal 2 @($installedCommands | Where-Object {
         $_.Contains('"' + (Join-Path (Join-Path $installRoot 'runtime') 'Invoke-PortableFolderIcons.ps1') + '"')
-    }).Count 'all actions point to the installed dispatcher'
+    }).Count 'Repair and Uninstall point directly to the installed dispatcher'
+    Assert-Equal 11 @($installedCommands | Where-Object {
+        $_.Contains('"' + (Join-Path (Join-Path $installRoot 'runtime') 'Invoke-PortableFolderIcons.Hidden.vbs') + '"')
+    }).Count 'normal Apply and Reset point to the installed windowless launcher'
     Assert-True (Test-Path -LiteralPath (Join-Path (Join-Path $installRoot 'runtime') 'Invoke-PortableFolderIcons.ps1') -PathType Leaf) 'installed action dispatcher exists'
+    Assert-True (Test-Path -LiteralPath (Join-Path (Join-Path $installRoot 'runtime') 'Invoke-PortableFolderIcons.Hidden.vbs') -PathType Leaf) `
+        'installed windowless launcher exists'
     Assert-Throws {
         Register-PfiContextMenu -Manifest $installedManifest -InstallRoot $installRoot `
             -RegistryRoot 'HKCU:\Software\Classes\Directory\shell\ForeignTool' -WhatIf
@@ -766,8 +778,15 @@ try {
     $cleanupText = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\Windows\Cleanup-PortableFolderIcons.ps1') -Raw
     Assert-True ($cleanupText -match '(?s)for \(\$attempt.*?Get-Process -Id \$ParentProcessId.*?break') 'uninstall cleanup sleep is a bounded poll on parent process exit'
     $integrationText = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Integration.ps1') -Raw
-    Assert-True ($integrationText.Contains("if (`$Action -notin @('Apply', 'Reset') -or -not `$DeveloperMode)")) `
-        'context-menu visibility follows installed Developer Mode'
+    Assert-True ($integrationText.Contains("if (`$Action -in @('Apply', 'Reset') -and -not `$DeveloperMode)")) `
+        'normal Apply and Reset route through the windowless launcher'
+    $hiddenLauncherText = Get-Content -LiteralPath (
+        Join-Path $repoRoot 'scripts\Windows\Invoke-PortableFolderIcons.Hidden.vbs'
+    ) -Raw
+    Assert-True ($hiddenLauncherText.Contains('shell.Run(command, 0, True)')) `
+        'windowless launcher uses hidden window style and waits for completion'
+    Assert-True ($hiddenLauncherText.Contains('EncodeUtf16Hex(targetPath)')) `
+        'windowless launcher transports shell-sensitive Unicode targets as hex'
 
     $emptyFolder = Join-Path $testRoot 'Empty Reset'
     [void](New-Item -ItemType Directory -Path $emptyFolder)

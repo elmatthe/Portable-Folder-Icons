@@ -25,6 +25,15 @@ dependency.
 The installed runtime remains independent of the repository, rollback covers
 settings, and Uninstall removes installed settings with the runtime.
 
+**Implementation correction:** `powershell.exe -WindowStyle Hidden` still
+briefly created a visible console before PowerShell processed that option.
+Normal Apply/Reset therefore use an installed VBScript through `wscript.exe`,
+which starts the dispatcher with window style 0 and waits for completion.
+Selected paths are encoded as UTF-16 hex before entering the secondary command
+line, preventing `%`, `!`, ampersands, parentheses, apostrophes, spaces, and
+Unicode from being reinterpreted. Developer Mode still invokes PowerShell
+directly and visibly.
+
 ## 009 — Version applied icon resources and fully reload one parent tab — 2026-07-28 — Codex
 
 **Status:** Accepted; supersedes #004 for Apply/Reset repaint behavior
