@@ -40,6 +40,9 @@ $required = @(
     'LICENSE',
     'README.md',
     'config.toml',
+    'files\readme-assets\colored-folders-example.png',
+    'files\readme-assets\folder-color-gallery.png',
+    'files\readme-assets\folder-icons-submenu.png',
     'Setup_and_Run-Portable-Folder-Icons.bat',
     'Setup_and_Run-Portable-Folder-Icons.command',
     'md-instructions\Briefing.md',
@@ -179,6 +182,7 @@ foreach ($check in $forbiddenPatterns.GetEnumerator()) {
 
 $config = Get-Content -LiteralPath (Join-Path $repoRoot 'config.toml') -Raw
 if ($config -match 'version\s*=\s*"0\.1\.0"' -and
+    $config -match '(?ms)^\[settings\]\s*.*?^developer_mode\s*=\s*false\s*(?:#.*)?$' -and
     $config -match 'requires_python\s*=\s*false' -and
     $config -match 'windows\s*=\s*true' -and
     $config -match 'macos\s*=\s*false') {
@@ -196,6 +200,41 @@ if ($briefing -match 'v0\.1\.0' -and $readme -match 'SmartScreen' -and
 }
 else {
     Add-CheckFailure 'required v0.1.0 documentation is incomplete'
+}
+
+$imageLinks = @([regex]::Matches($readme, '!\[[^\]]*\]\((files/readme-assets/[^)]+)\)') |
+    ForEach-Object { $_.Groups[1].Value })
+if ($imageLinks.Count -eq 3) {
+    $invalidImageLinks = @()
+    foreach ($relativeLink in $imageLinks) {
+        $segments = $relativeLink -split '/'
+        $cursor = $repoRoot
+        foreach ($segment in $segments) {
+            $exact = @(Get-ChildItem -LiteralPath $cursor -Force | Where-Object Name -ceq $segment)
+            if ($exact.Count -ne 1) {
+                $invalidImageLinks += $relativeLink
+                break
+            }
+            $cursor = $exact[0].FullName
+        }
+    }
+    if ($invalidImageLinks.Count -eq 0) {
+        Add-CheckPass 'README image links resolve with exact committed filename casing'
+    }
+    else {
+        Add-CheckFailure ('README image link casing/path failure: {0}' -f ($invalidImageLinks -join ', '))
+    }
+}
+else {
+    Add-CheckFailure ('README must reference exactly three release images; found {0}' -f $imageLinks.Count)
+}
+if ($readme -match 'Press F5, navigate away and back, or open a new Explorer window/view' -and
+    $readme -match 'Reset normally updates immediately' -and
+    $readme -notmatch '(?i)(always|guarantee)[^\r\n]{0,50}(immediate|repaint)') {
+    Add-CheckPass 'README states the accepted Explorer refresh limitation'
+}
+else {
+    Add-CheckFailure 'README refresh limitation is missing or overpromises repaint behavior'
 }
 
 if ($PSVersionTable.PSVersion.Major -eq 5 -and $PSVersionTable.PSVersion.Minor -ge 1) {

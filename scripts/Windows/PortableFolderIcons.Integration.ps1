@@ -54,7 +54,8 @@ function New-PfiActionCommand {
         [ValidateSet('Apply', 'Reset', 'Repair', 'Uninstall')]
         [string]$Action,
         [string]$IconHash,
-        [switch]$IncludeTarget
+        [switch]$IncludeTarget,
+        [bool]$DeveloperMode = $false
     )
 
     $parts = @(
@@ -67,7 +68,7 @@ function New-PfiActionCommand {
         '-Action',
         $Action
     )
-    if ($Action -notin @('Apply', 'Reset')) {
+    if ($Action -notin @('Apply', 'Reset') -or -not $DeveloperMode) {
         $parts = @($parts[0..2]) + @('-WindowStyle Hidden') + @($parts[3..($parts.Count - 1)])
     }
     if (-not [string]::IsNullOrWhiteSpace($IconHash)) {
@@ -105,7 +106,8 @@ function Get-PfiRegistryPlan {
         [string]$RegistryRoot = $script:PfiProductionRegistryRoot,
         [string]$SubcommandsRoot = $script:PfiProductionSubcommandsRoot,
         [string]$SubcommandsReference = $script:PfiProductionSubcommandsReference,
-        [string]$PowerShellPath = (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe')
+        [string]$PowerShellPath = (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'),
+        [bool]$DeveloperMode = $false
     )
 
     if (-not $RegistryRoot.StartsWith('HKCU:\', [StringComparison]::OrdinalIgnoreCase) -or
@@ -143,7 +145,7 @@ function Get-PfiRegistryPlan {
         $verbName = 'Icon_{0:D4}_{1}' -f $ordinal, ([string]$entry.hash).ToLowerInvariant()
         $verbPath = Join-Path $subcommandsShell $verbName
         $cachedIcon = Join-Path (Join-Path $InstallRoot 'icons') ([string]$entry.cachedFilename)
-        $command = New-PfiActionCommand $PowerShellPath $runtimeScript Apply ([string]$entry.hash) -IncludeTarget
+        $command = New-PfiActionCommand $PowerShellPath $runtimeScript Apply ([string]$entry.hash) -IncludeTarget -DeveloperMode $DeveloperMode
         $plan.Add((New-PfiRegistryValue $verbPath 'MUIVerb' ([string]$entry.menuLabel)))
         $plan.Add((New-PfiRegistryValue $verbPath 'Icon' ($cachedIcon + ',0')))
         $plan.Add((New-PfiRegistryValue (Join-Path $verbPath 'command') '' $command))
@@ -153,7 +155,7 @@ function Get-PfiRegistryPlan {
     $plan.Add((New-PfiRegistryValue $resetPath 'MUIVerb' 'Reset to Default'))
     $plan.Add((New-PfiRegistryValue $resetPath 'CommandFlags' 32 'DWord'))
     $plan.Add((New-PfiRegistryValue (Join-Path $resetPath 'command') '' (
-        New-PfiActionCommand $PowerShellPath $runtimeScript Reset -IncludeTarget
+        New-PfiActionCommand $PowerShellPath $runtimeScript Reset -IncludeTarget -DeveloperMode $DeveloperMode
     )))
 
     $repairPath = Join-Path $subcommandsShell 'Utility_0200_Repair'
@@ -238,7 +240,8 @@ function Register-PfiContextMenu {
         [string]$RegistryRoot = $script:PfiProductionRegistryRoot,
         [string]$SubcommandsRoot = $script:PfiProductionSubcommandsRoot,
         [string]$SubcommandsReference = $script:PfiProductionSubcommandsReference,
-        [string]$DirectoryShellRoot = $script:PfiProductionDirectoryShellRoot
+        [string]$DirectoryShellRoot = $script:PfiProductionDirectoryShellRoot,
+        [bool]$DeveloperMode = $false
     )
 
     if (-not (Test-PfiApprovedRegistryRoots $RegistryRoot $SubcommandsRoot $DirectoryShellRoot)) {
@@ -246,7 +249,7 @@ function Register-PfiContextMenu {
     }
     $plan = @(Get-PfiRegistryPlan -Manifest $Manifest -InstallRoot $InstallRoot `
         -RegistryRoot $RegistryRoot -SubcommandsRoot $SubcommandsRoot `
-        -SubcommandsReference $SubcommandsReference)
+        -SubcommandsReference $SubcommandsReference -DeveloperMode $DeveloperMode)
     if (-not $PSCmdlet.ShouldProcess($RegistryRoot, 'Replace Portable Folder Icons context menu')) {
         return $plan
     }

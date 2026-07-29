@@ -1,4 +1,8 @@
-# Portable Folder Icons project metadata. Runtime settings live in PowerShell.
+# Portable Folder Icons project metadata and setup configuration.
+
+[settings]
+# false keeps Apply/Reset silent; true shows their diagnostic terminal and result dialog.
+developer_mode = false
 
 [project]
 name = "Portable-Folder-Icons"

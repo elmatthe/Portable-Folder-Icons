@@ -21,6 +21,7 @@ function Test-PfiInstalledRuntime {
     if ($missing.Count -gt 0) {
         throw ('Installed runtime is incomplete. Missing: {0}' -f ($missing -join ', '))
     }
+    $settings = Read-PfiInstalledSettings (Join-Path $InstallRoot 'settings.json')
     $manifest = Read-PfiManifest (Join-Path $InstallRoot 'manifest.json')
     $validated = 0
     foreach ($entry in @($manifest.entries | Where-Object validationState -eq 'Accepted')) {
@@ -36,7 +37,11 @@ function Test-PfiInstalledRuntime {
         }
         $validated++
     }
-    return [pscustomobject]@{ Manifest = $manifest; ValidatedIcons = $validated }
+    return [pscustomobject]@{
+        Manifest = $manifest
+        Settings = $settings
+        ValidatedIcons = $validated
+    }
 }
 
 function Invoke-PfiRepair {
@@ -48,7 +53,8 @@ function Invoke-PfiRepair {
 
     $state = Test-PfiInstalledRuntime $InstallRoot
     if (-not $SkipRegistry) {
-        [void](Register-PfiContextMenu -Manifest $state.Manifest -InstallRoot $InstallRoot)
+        [void](Register-PfiContextMenu -Manifest $state.Manifest -InstallRoot $InstallRoot `
+            -DeveloperMode ([bool]$state.Settings.developerMode))
     }
     # Generated per-folder resources are counted but deliberately NOT deleted.
     # Whether a resource is still referenced can only be answered by reading the
@@ -67,6 +73,7 @@ function Invoke-PfiRepair {
         Registry = if ($SkipRegistry) { 'Skipped' } else { 'Recreated' }
         ImportedRepositoryIcons = $false
         GeneratedResources = $generatedResources
+        DeveloperMode = [bool]$state.Settings.developerMode
     }
 }
 
@@ -86,7 +93,7 @@ function Remove-PfiInstalledFiles {
             throw 'Refusing cleanup outside the exact Portable-Folder-Icons install root.'
         }
     }
-    foreach ($relativePath in @('runtime', 'manifest.json')) {
+    foreach ($relativePath in @('runtime', 'manifest.json', 'settings.json')) {
         $target = Join-Path $root $relativePath
         if (Test-Path -LiteralPath $target) {
             [void](Assert-PfiPathWithinRoot $target $root)

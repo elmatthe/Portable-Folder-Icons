@@ -114,6 +114,28 @@ $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('PfiTests-' + [guid]::NewGuid(
 $registryTestBase = $null
 $registryTestSubcommands = $null
 try {
+    $configPath = Join-Path $repoRoot 'config.toml'
+    Assert-Equal $false (Read-PfiDeveloperModeConfig $configPath) 'Developer Mode defaults to false'
+    foreach ($case in @(
+        @{ Text = "[settings]`r`ndeveloper_mode = true`r`n"; Expected = $true; Name = 'strictly parses true' },
+        @{ Text = "[settings]`r`ndeveloper_mode = false # normal`r`n"; Expected = $false; Name = 'strictly parses false' }
+    )) {
+        $casePath = Join-Path $testRoot (($case.Name -replace '\W', '-') + '.toml')
+        [IO.File]::WriteAllText($casePath, $case.Text)
+        Assert-Equal $case.Expected (Read-PfiDeveloperModeConfig $casePath) $case.Name
+    }
+    foreach ($case in @(
+        "[settings]`r`ndeveloper_mode =`r`n",
+        "[settings]`r`ndeveloper_mode = yes`r`n",
+        "[settings]`r`ndeveloper_mode = False`r`n",
+        "[settings]`r`ndeveloper_mode = false`r`ndeveloper_mode = true`r`n",
+        "[project]`r`nname = `"missing setting`"`r`n"
+    )) {
+        $badPath = Join-Path $testRoot ('bad-' + [guid]::NewGuid().ToString('N') + '.toml')
+        [IO.File]::WriteAllText($badPath, $case)
+        Assert-Throws { Read-PfiDeveloperModeConfig $badPath } 'rejects malformed, missing, or duplicate Developer Mode setting'
+    }
+
     Assert-Equal 'Blue' (ConvertTo-PfiMenuLabel 'Folder_Blue.ico') 'normalizes Folder_ prefix'
     Assert-Equal 'Work Projects' (ConvertTo-PfiMenuLabel 'Work__Projects.ico') 'normalizes underscores and whitespace'
     Assert-Equal 'MiXeD' (ConvertTo-PfiMenuLabel 'folder-MiXeD.ICO') 'preserves capitalization'
@@ -209,6 +231,8 @@ try {
     & $windowsPowerShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $installer `
         -RepositoryRoot $repoRoot -InstallRoot $installRoot -SkipRegistry *> $null
     Assert-Equal 0 $LASTEXITCODE 'installer succeeds in path with spaces and Unicode'
+    $installedSettings = Read-PfiInstalledSettings (Join-Path $installRoot 'settings.json')
+    Assert-Equal $false $installedSettings.developerMode 'setup persists normal mode in installed settings'
     $installedManifest = Read-PfiManifest (Join-Path $installRoot 'manifest.json')
     Assert-Equal 10 @($installedManifest.entries | Where-Object validationState -eq 'Accepted').Count 'installer imports ten valid ICOs'
     $cachedBefore = @(Get-ChildItem -LiteralPath (Join-Path $installRoot 'icons') -Filter '*.ico').Count
@@ -216,6 +240,32 @@ try {
         -RepositoryRoot $repoRoot -InstallRoot $installRoot -SkipRegistry *> $null
     Assert-Equal 0 $LASTEXITCODE 'installer rerun is idempotent'
     Assert-Equal $cachedBefore @(Get-ChildItem -LiteralPath (Join-Path $installRoot 'icons') -Filter '*.ico').Count 'installer preserves hash cache on rerun'
+    $configurationRepo = Join-Path $testRoot 'Configuration Checkout (ü)%!'
+    [void](New-Item -ItemType Directory -Path (Join-Path $configurationRepo 'scripts\Windows') -Force)
+    [void](New-Item -ItemType Directory -Path (Join-Path $configurationRepo 'files\ICO-Files') -Force)
+    Copy-Item -Path (Join-Path $repoRoot 'scripts\Windows\*.ps1') `
+        -Destination (Join-Path $configurationRepo 'scripts\Windows')
+    Copy-Item -Path (Join-Path $repoRoot 'files\ICO-Files\*.ico') `
+        -Destination (Join-Path $configurationRepo 'files\ICO-Files')
+    [IO.File]::WriteAllText(
+        (Join-Path $configurationRepo 'config.toml'),
+        "[settings]`r`ndeveloper_mode = true`r`n"
+    )
+    & $windowsPowerShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $installer `
+        -RepositoryRoot $configurationRepo -InstallRoot $installRoot -SkipRegistry *> $null
+    Assert-Equal 0 $LASTEXITCODE 'setup rerun accepts changed Developer Mode'
+    Assert-Equal $true (Read-PfiInstalledSettings (Join-Path $installRoot 'settings.json')).developerMode `
+        'setup rerun updates effective installed setting'
+    $settingRepair = Invoke-PfiRepair -InstallRoot $installRoot -SkipRegistry
+    Assert-Equal $true $settingRepair.DeveloperMode 'Repair preserves and reuses installed Developer Mode'
+    [IO.File]::WriteAllText(
+        (Join-Path $configurationRepo 'config.toml'),
+        "[settings]`r`ndeveloper_mode = false`r`n"
+    )
+    & $windowsPowerShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $installer `
+        -RepositoryRoot $configurationRepo -InstallRoot $installRoot -SkipRegistry *> $null
+    Assert-Equal $false (Read-PfiInstalledSettings (Join-Path $installRoot 'settings.json')).developerMode `
+        'setup rerun can return installed setting to normal mode'
 
     $commandInstallRoot = 'C:\Users\Test User\Local & Data (β)%!'
     $registryRoot = 'HKCU:\Software\PortableFolderIcons\Tests\DryRun'
@@ -252,6 +302,30 @@ try {
     Assert-True ($applyCommand.Contains('"' + $commandInstallRoot + '\runtime\Invoke-PortableFolderIcons.ps1"')) 'registry command quotes stable runtime path'
     Assert-True ($applyCommand.EndsWith(' -TargetPath "%1"')) 'registry passes target as a fixed argument'
     Assert-Equal $false ($applyCommand.Contains('-Command')) 'registry never interpolates target into PowerShell code'
+    Assert-True ($applyCommand.Contains('-WindowStyle Hidden')) 'normal mode hides Apply PowerShell window'
+    $normalResetCommand = ($registryPlan | Where-Object {
+        $_.Name -eq '' -and $_.Value -match ' -Action Reset '
+    }).Value
+    Assert-True ($normalResetCommand.Contains('-WindowStyle Hidden')) 'normal mode hides Reset PowerShell window'
+    $developerPlan = @(Get-PfiRegistryPlan -Manifest $installedManifest `
+        -InstallRoot $commandInstallRoot -RegistryRoot $registryRoot `
+        -SubcommandsRoot $subcommandsRoot -SubcommandsReference $subcommandsReference `
+        -PowerShellPath 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' `
+        -DeveloperMode $true)
+    $developerApply = ($developerPlan | Where-Object {
+        $_.Name -eq '' -and $_.Value -match ' -Action Apply '
+    } | Select-Object -First 1).Value
+    $developerReset = ($developerPlan | Where-Object {
+        $_.Name -eq '' -and $_.Value -match ' -Action Reset '
+    }).Value
+    Assert-Equal $false ($developerApply.Contains('-WindowStyle Hidden')) 'Developer Mode keeps Apply PowerShell window visible'
+    Assert-Equal $false ($developerReset.Contains('-WindowStyle Hidden')) 'Developer Mode keeps Reset PowerShell window visible'
+    foreach ($utility in @('Repair', 'Uninstall')) {
+        $utilityCommand = ($developerPlan | Where-Object {
+            $_.Name -eq '' -and $_.Value -match (' -Action ' + $utility + '(?: |$)')
+        }).Value
+        Assert-True ($utilityCommand.Contains('-WindowStyle Hidden')) ($utility + ' command remains hidden and interactive dialogs remain available')
+    }
     Assert-True (@($registryPlan | Where-Object { $_.Value -eq 'Repair Portable Folder Icons' }).Count -eq 1) 'registry includes Repair'
     Assert-True (@($registryPlan | Where-Object { $_.Value -eq 'Uninstall Portable Folder Icons' }).Count -eq 1) 'registry includes Uninstall'
     $installedRegistryPlan = @(Get-PfiRegistryPlan -Manifest $installedManifest -InstallRoot $installRoot `
@@ -662,8 +736,15 @@ try {
     Assert-True ($dispatcherText.Contains('but Explorer could not be refreshed automatically')) 'dispatcher distinguishes refresh warning from apply failure'
     # The dispatcher may report what it did; it may not assert what is on screen,
     # because nothing in the product verifies rendered pixels.
-    Assert-True ($dispatcherText.Contains('Explorer is serving a cached icon')) 'Apply completion explains a cached icon instead of claiming the icon changed'
+    Assert-True ($dispatcherText.Contains('Press F5, navigate away and back, or open a new Explorer window/view')) `
+        'Developer Mode Apply completion states the accepted refresh workaround'
     Assert-Equal $false ($dispatcherText.Contains("'Apply completed successfully.'")) 'Apply completion does not claim unverified visual success'
+    Assert-True ($dispatcherText.Contains('($null -eq $actionResult -or $actionResult.RefreshSucceeded)')) `
+        'normal mode suppresses successful Apply and Reset completion MessageBox'
+    Assert-True ($dispatcherText.IndexOf('if (-not $developerMode -and') -lt
+        $dispatcherText.IndexOf('$completionMessage =')) 'normal-mode completion suppression precedes completion dialog construction'
+    Assert-True ($dispatcherText.Contains('[Windows.MessageBoxImage]::Error')) 'error dialog remains available in normal mode'
+    Assert-True ($dispatcherText.Contains('Read-PfiInstalledSettings')) 'dispatcher uses installed settings instead of repository config'
 
     # Constraints that must hold across the whole runtime.
     $runtimeSources = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'scripts\Windows') -File -Filter '*.ps1')
@@ -685,8 +766,8 @@ try {
     $cleanupText = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\Windows\Cleanup-PortableFolderIcons.ps1') -Raw
     Assert-True ($cleanupText -match '(?s)for \(\$attempt.*?Get-Process -Id \$ParentProcessId.*?break') 'uninstall cleanup sleep is a bounded poll on parent process exit'
     $integrationText = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Integration.ps1') -Raw
-    Assert-True ($integrationText.Contains("if (`$Action -notin @('Apply', 'Reset'))")) `
-        'Apply and Reset commands keep a visible progress terminal'
+    Assert-True ($integrationText.Contains("if (`$Action -notin @('Apply', 'Reset') -or -not `$DeveloperMode)")) `
+        'context-menu visibility follows installed Developer Mode'
 
     $emptyFolder = Join-Path $testRoot 'Empty Reset'
     [void](New-Item -ItemType Directory -Path $emptyFolder)
@@ -710,6 +791,7 @@ try {
     Assert-Equal $false $repairResult.ImportedRepositoryIcons 'repair never claims repository import'
 
     $manifestBeforeConflict = [IO.File]::ReadAllText((Join-Path $installRoot 'manifest.json'))
+    Write-PfiInstalledSettings (New-PfiInstalledSettings -DeveloperMode $true) (Join-Path $installRoot 'settings.json')
     $corruptCachePath = Join-Path (Join-Path $installRoot 'icons') $actionEntry.cachedFilename
     [IO.File]::WriteAllText($corruptCachePath, 'corrupt')
     $integrityFolder = Join-Path $testRoot 'Integrity Target'
@@ -728,6 +810,8 @@ try {
     $ErrorActionPreference = $savedPreference
     Assert-True ($conflictExit -ne 0) 'setup fails safely on hash-filename cache conflict'
     Assert-Equal $manifestBeforeConflict ([IO.File]::ReadAllText((Join-Path $installRoot 'manifest.json'))) 'cache conflict preserves active manifest'
+    Assert-Equal $true (Read-PfiInstalledSettings (Join-Path $installRoot 'settings.json')).developerMode `
+        'failed setup preserves previous installed setting'
 
     $duplicateIniFolder = Join-Path $testRoot 'Duplicate Shell Sections'
     [void](New-Item -ItemType Directory -Path $duplicateIniFolder)
@@ -749,6 +833,7 @@ try {
     Assert-Equal $true $uninstallResult.CachePreserved 'uninstall preserves cache by default'
     Assert-Equal $false (Test-Path -LiteralPath (Join-Path $uninstallRoot 'runtime')) 'uninstall removes runtime'
     Assert-Equal $false (Test-Path -LiteralPath (Join-Path $uninstallRoot 'manifest.json')) 'uninstall removes active manifest'
+    Assert-Equal $false (Test-Path -LiteralPath (Join-Path $uninstallRoot 'settings.json')) 'uninstall removes installed settings'
     Assert-Equal $uninstallIconCount @(Get-ChildItem -LiteralPath (Join-Path $uninstallRoot 'icons') -Filter '*.ico').Count 'uninstall leaves cached icons intact'
     [void](Invoke-PfiUninstall -InstallRoot $uninstallRoot -Confirmed -SkipRegistry)
     Assert-True (Test-Path -LiteralPath (Join-Path $uninstallRoot 'icons')) 'second uninstall is safe'

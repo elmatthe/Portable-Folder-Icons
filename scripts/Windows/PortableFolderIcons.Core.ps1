@@ -1,5 +1,82 @@
 Set-StrictMode -Version 2.0
 
+$script:PfiSettingsSchema = 1
+
+function Read-PfiDeveloperModeConfig {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+
+    if (-not (Test-Path -LiteralPath $LiteralPath -PathType Leaf)) {
+        throw "Configuration file is missing: $LiteralPath"
+    }
+    $inSettings = $false
+    $settingsSectionCount = 0
+    $settingValues = New-Object System.Collections.Generic.List[string]
+    foreach ($line in [IO.File]::ReadAllLines($LiteralPath)) {
+        $trimmed = $line.Trim()
+        if ($trimmed -match '^\[([^\]]+)\]\s*(?:#.*)?$') {
+            $inSettings = ($matches[1] -ceq 'settings')
+            if ($inSettings) { $settingsSectionCount++ }
+            continue
+        }
+        if ($inSettings -and $trimmed -match '^developer_mode\s*=\s*([^#]*?)(?:\s+#.*)?$') {
+            $settingValues.Add($Matches[1].Trim())
+        }
+    }
+    if ($settingsSectionCount -ne 1 -or $settingValues.Count -ne 1) {
+        throw 'config.toml must contain exactly one [settings] developer_mode Boolean.'
+    }
+    if ($settingValues[0] -ceq 'true') { return $true }
+    if ($settingValues[0] -ceq 'false') { return $false }
+    throw 'config.toml [settings] developer_mode must be the TOML Boolean true or false.'
+}
+
+function New-PfiInstalledSettings {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][bool]$DeveloperMode)
+
+    return [pscustomobject][ordered]@{
+        schemaVersion = $script:PfiSettingsSchema
+        developerMode = $DeveloperMode
+    }
+}
+
+function Write-PfiInstalledSettings {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Settings,
+        [Parameter(Mandatory = $true)][string]$LiteralPath
+    )
+
+    $parent = Split-Path -Parent $LiteralPath
+    [void](New-Item -ItemType Directory -Path $parent -Force)
+    $temporary = Join-Path $parent ('.settings-' + [guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        $json = $Settings | ConvertTo-Json -Depth 3
+        [IO.File]::WriteAllText($temporary, $json + "`r`n", (New-Object Text.UTF8Encoding($false)))
+        Move-Item -LiteralPath $temporary -Destination $LiteralPath -Force
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+    }
+}
+
+function Read-PfiInstalledSettings {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+
+    if (-not (Test-Path -LiteralPath $LiteralPath -PathType Leaf)) {
+        throw 'Installed settings are missing. Rerun repository setup.'
+    }
+    try { $settings = Get-Content -LiteralPath $LiteralPath -Raw | ConvertFrom-Json }
+    catch { throw 'Installed settings are malformed. Rerun repository setup.' }
+    if ($settings.schemaVersion -ne $script:PfiSettingsSchema -or
+        $settings.developerMode -isnot [bool]) {
+        throw 'Installed settings are invalid. Rerun repository setup.'
+    }
+    return $settings
+}
+
 $script:PfiVersion = '0.1.0'
 $script:PfiManifestSchema = 1
 

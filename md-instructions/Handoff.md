@@ -2,9 +2,22 @@
 
 ## Current Focus
 
-All implementation phases are complete on
-`feature/v0.1.0-portable-folder-icons`. Setup and the repaired classic cascade
-passed manual testing.
+Release preparation is complete on `feature/v0.1.0-portable-folder-icons`,
+which remains unmerged. The user manually accepted setup, the classic cascade,
+sequential Apply behavior, and Reset for v0.1.0.
+
+The accepted Explorer limitation is: an already-open Explorer view may retain
+the previous folder color until refreshed. Press F5, navigate away and back,
+or open a new Explorer window/view to display the current color. Reset normally
+updates immediately. Do not reopen the refresh-system design for v0.1.0.
+
+Apply and Reset now run silently by default. Setting
+`[settings] developer_mode = true` in `config.toml` before rerunning setup
+restores their progress terminal and completion/warning dialog. Errors remain
+visible in both modes. Setup persists the strict Boolean in installed
+`settings.json`; Repair reuses it, rollback preserves it, and Uninstall removes
+it. This new Developer Mode behavior still requires manual acceptance before
+merge.
 
 The fifth investigation into the stale-icon defect measured what Explorer
 **actually paints**, by capturing the live window with `PrintWindow` and
@@ -22,7 +35,8 @@ two real defects, but it also established a genuine Windows limitation:
   supported non-invasive mechanism was found that makes an already-open view
   repaint a *changed* custom icon promptly. See "Explorer icon cache" below.
 
-The rendered result still requires user acceptance before any merge.
+The rendered icon behavior has user acceptance. Developer Mode is the only
+remaining manual acceptance gate before merge.
 
 ---
 
@@ -93,6 +107,23 @@ cache; it is forbidden here and was not implemented.
 ---
 
 ## Work Log (newest first)
+
+- 2026-07-29 — Public-release preparation. Added strict default-false
+  Developer Mode parsing and staged installed settings; normal Apply/Reset
+  commands are hidden and omit success dialogs while errors remain visible,
+  and Developer Mode retains progress and result UI. Repair preserves the
+  installed value, rollback restores it, and Uninstall removes it. Rewrote the
+  README and v0.1.0 changelog around the accepted Explorer limitation, added
+  ADR 010, updated this briefing/handoff set, generated
+  `files/readme-assets/folder-color-gallery.png`, and added sanitized
+  `colored-folders-example.png` and `folder-icons-submenu.png`. Updated:
+  `.gitignore`, `README.md`, `config.toml`, four permanent instruction documents, six
+  shipped PowerShell/runtime files as applicable, `scripts/verify.ps1`, and
+  `files/tests/Invoke-Tests.ps1`. Added: three README PNG assets. Deleted: no
+  tracked files or directories; the local source screenshot folder was
+  deliberately preserved and ignored to prevent accidental publication.
+  Developer Mode awaits manual acceptance and the
+  feature branch remains unmerged.
 
 - 2026-07-29 — Fifth investigation. Built the missing instrument first: a
   `PrintWindow(PW_RENDERFULLCONTENT)` capture of the live Explorer window plus

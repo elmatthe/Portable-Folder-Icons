@@ -5,6 +5,26 @@ entries appear first.
 
 ---
 
+## 010 — Default-silent actions with opt-in Developer Mode — 2026-07-29 — Codex
+
+**Status:** Accepted for implementation; awaiting manual acceptance
+**Context:** Apply and Reset are routine context-menu actions. Keeping a
+diagnostic terminal and confirmation dialog visible on every success adds
+friction, but hiding failures would make the tool difficult to support.
+**Decision:** Add the strict TOML Boolean `[settings] developer_mode`, default
+it to `false`, and parse only that setting with Windows PowerShell 5.1 code.
+Setup persists the effective value in the installed `settings.json` and builds
+Apply/Reset commands from it. Normal mode hides their terminal and suppresses
+success UI, but error dialogs remain visible. Developer Mode retains progress
+and completion/warning dialogs. Repair reads and preserves installed settings.
+**Alternatives considered:** Reading the repository on every action would
+break portability; environment variables or machine-wide registry state would
+be implicit and harder to audit; a TOML package would add an unnecessary
+dependency.
+**Consequences:** A configuration change takes effect after setup is rerun.
+The installed runtime remains independent of the repository, rollback covers
+settings, and Uninstall removes installed settings with the runtime.
+
 ## 009 — Version applied icon resources and fully reload one parent tab — 2026-07-28 — Codex
 
 **Status:** Accepted; supersedes #004 for Apply/Reset repaint behavior
@@ -14,19 +34,18 @@ stale system image-list entry. Reset was immediate because it left the
 customized-folder state. A unique ICO filename alone and targeted
 `SHUpdateImage` also failed to change the stale entry.
 **Decision:** Give every Apply a unique resource beneath
-`icons\applied`, remove only superseded resources whose filename prefix matches
-the selected folder's canonical-path hash, then navigate the one matching
+`icons\applied`, retain resources across Apply operations, then navigate the one matching
 Shell tab to its parent and back. Detect both completed navigations from that
 automation object's canonical filesystem location and Busy state, without a
-fixed sleep. Keep Apply/Reset terminals visible for progress and warnings.
+fixed sleep. Developer Mode may expose Apply/Reset progress and warnings.
 **Alternatives considered:** More item notifications, `SHUpdateImage`, a
 global association/cache refresh, Explorer restart, and arbitrary delays were
 ineffective or too disruptive.
 **Consequences:** The matching tab remains open and returns to its original
 folder, but selection, scroll position, and navigation history may change.
-Generated resources add a bounded current resource per actively customized
-folder; setup/uninstall cache-preservation rules continue to protect applied
-folders.
+Generated resources accumulate safely until Reset reclaims only resources
+owned by that folder; Repair counts them but cannot safely infer they are
+unreferenced.
 
 ## 008 — Correct icon-source directory capitalization — 2026-07-28 — Codex
 

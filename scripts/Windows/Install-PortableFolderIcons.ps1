@@ -61,13 +61,17 @@ $sourceScripts = Join-Path $RepositoryRoot 'scripts\Windows'
 $runtimePath = Join-Path $InstallRoot 'runtime'
 $iconsPath = Join-Path $InstallRoot 'icons'
 $manifestPath = Join-Path $InstallRoot 'manifest.json'
+$settingsPath = Join-Path $InstallRoot 'settings.json'
 $stageRoot = Join-Path $InstallRoot ('.stage-' + [guid]::NewGuid().ToString('N'))
 $stageRuntime = Join-Path $stageRoot 'runtime'
 $oldRuntime = Join-Path $InstallRoot ('.runtime-old-' + [guid]::NewGuid().ToString('N'))
 $oldManifest = Join-Path $InstallRoot ('.manifest-old-' + [guid]::NewGuid().ToString('N') + '.json')
+$oldSettings = Join-Path $InstallRoot ('.settings-old-' + [guid]::NewGuid().ToString('N') + '.json')
 $runtimeMoved = $false
 $manifestMoved = $false
+$settingsMoved = $false
 $previousManifest = $null
+$previousSettings = $null
 
 try {
     if (-not (Test-Path -LiteralPath $sourceScripts -PathType Container)) {
@@ -80,6 +84,7 @@ try {
     Write-Host ('Stable install root: {0}' -f $InstallRoot)
     Write-Host ('Icon source: {0}' -f $sourceIcons)
     Write-Host 'Staging and validating runtime scripts...'
+    $developerMode = Read-PfiDeveloperModeConfig (Join-Path $RepositoryRoot 'config.toml')
 
     $runtimeSources = @(Get-ChildItem -LiteralPath $sourceScripts -Filter '*.ps1' -File | Sort-Object Name)
     $requiredRuntime = @(
@@ -135,6 +140,9 @@ try {
     $stagedManifest = Join-Path $stageRoot 'manifest.json'
     Write-PfiManifest -Manifest $manifest -LiteralPath $stagedManifest
     [void](Read-PfiManifest -LiteralPath $stagedManifest)
+    $stagedSettings = Join-Path $stageRoot 'settings.json'
+    Write-PfiInstalledSettings (New-PfiInstalledSettings -DeveloperMode $developerMode) $stagedSettings
+    [void](Read-PfiInstalledSettings $stagedSettings)
 
     if (Test-Path -LiteralPath $runtimePath -PathType Container) {
         Move-Item -LiteralPath $runtimePath -Destination $oldRuntime
@@ -145,11 +153,17 @@ try {
         Move-Item -LiteralPath $manifestPath -Destination $oldManifest
         $manifestMoved = $true
     }
+    if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
+        try { $previousSettings = Read-PfiInstalledSettings $settingsPath } catch { $previousSettings = $null }
+        Move-Item -LiteralPath $settingsPath -Destination $oldSettings
+        $settingsMoved = $true
+    }
     Move-Item -LiteralPath $stageRuntime -Destination $runtimePath
     Move-Item -LiteralPath $stagedManifest -Destination $manifestPath
+    Move-Item -LiteralPath $stagedSettings -Destination $settingsPath
 
     if (-not $SkipRegistry) {
-        [void](Register-PfiContextMenu -Manifest (Read-PfiManifest $manifestPath) -InstallRoot $InstallRoot)
+        [void](Register-PfiContextMenu -Manifest (Read-PfiManifest $manifestPath) -InstallRoot $InstallRoot -DeveloperMode $developerMode)
     }
 
     if ($runtimeMoved -and (Test-Path -LiteralPath $oldRuntime -PathType Container)) {
@@ -162,6 +176,11 @@ try {
         Remove-Item -LiteralPath $oldManifest -Force
         $manifestMoved = $false
     }
+    if ($settingsMoved -and (Test-Path -LiteralPath $oldSettings -PathType Leaf)) {
+        [void](Assert-PfiPathWithinRoot -CandidatePath $oldSettings -AllowedRoot $InstallRoot)
+        Remove-Item -LiteralPath $oldSettings -Force
+        $settingsMoved = $false
+    }
 
     Write-SetupSummary -Inventory $inventory
     Write-Host ''
@@ -171,6 +190,7 @@ try {
         Runtime = $runtimePath
         Icons = $iconsPath
         Manifest = $manifestPath
+        Settings = ('{0} (developer_mode={1})' -f $settingsPath, $developerMode.ToString().ToLowerInvariant())
         Registry = if ($SkipRegistry) { 'Skipped by request' } else { $script:PfiProductionRegistryRoot }
     } | Format-List | Out-Host
     exit 0
@@ -191,8 +211,20 @@ catch {
         }
         Move-Item -LiteralPath $oldManifest -Destination $manifestPath
     }
+    if ($settingsMoved -and (Test-Path -LiteralPath $oldSettings -PathType Leaf)) {
+        if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
+            [void](Assert-PfiPathWithinRoot -CandidatePath $settingsPath -AllowedRoot $InstallRoot)
+            Remove-Item -LiteralPath $settingsPath -Force
+        }
+        Move-Item -LiteralPath $oldSettings -Destination $settingsPath
+    }
     if (-not $SkipRegistry -and $null -ne $previousManifest) {
-        try { [void](Register-PfiContextMenu -Manifest $previousManifest -InstallRoot $InstallRoot) }
+        try {
+            $previousDeveloperMode = if ($null -ne $previousSettings) {
+                [bool]$previousSettings.developerMode
+            } else { $false }
+            [void](Register-PfiContextMenu -Manifest $previousManifest -InstallRoot $InstallRoot -DeveloperMode $previousDeveloperMode)
+        }
         catch { [Console]::Error.WriteLine('WARNING: Previous context menu could not be restored automatically.') }
     }
     exit 20

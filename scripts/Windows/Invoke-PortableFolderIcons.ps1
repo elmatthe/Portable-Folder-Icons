@@ -17,6 +17,8 @@ $installRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'PortableFolderIcons.Maintenance.ps1')
 
 try {
+    $installedSettings = Read-PfiInstalledSettings (Join-Path $installRoot 'settings.json')
+    $developerMode = [bool]$installedSettings.developerMode
     $actionResult = $null
     switch ($Action) {
         'Apply' {
@@ -29,7 +31,7 @@ try {
             $repair = Invoke-PfiRepair -InstallRoot $installRoot
             Add-Type -AssemblyName PresentationFramework
             [void][Windows.MessageBox]::Show(
-                ("Repair completed.`nRuntime: valid`nCached icons checked: {0}`nRegistry: recreated`n`nRepair does not import repository icons. Rerun repository setup to rescan them." -f $repair.ValidatedIcons),
+                ("Repair completed.`nRuntime: valid`nCached icons checked: {0}`nRegistry: recreated`nDeveloper Mode: {1}`n`nRepair does not import repository icons. Rerun repository setup to rescan them." -f $repair.ValidatedIcons, $repair.DeveloperMode),
                 'Portable Folder Icons',
                 [Windows.MessageBoxButton]::OK,
                 [Windows.MessageBoxImage]::Information
@@ -65,6 +67,10 @@ try {
             exit 0
         }
     }
+    if (-not $developerMode -and
+        ($null -eq $actionResult -or $actionResult.RefreshSucceeded)) {
+        exit 0
+    }
     Add-Type -AssemblyName PresentationFramework
     # This reports what was actually done, not what is on screen. Explorer caches
     # a folder's icon resource process-wide and may keep drawing the previous
@@ -75,7 +81,7 @@ try {
         ('{0} completed and the folder customization was saved, but Explorer could not be refreshed automatically. The icon may update after Explorer processes the change.' -f $Action)
     }
     elseif ($Action -eq 'Apply') {
-        "Apply completed. The folder customization was saved and the open parent view was reloaded.`n`nIf the folder still shows its previous icon, Explorer is serving a cached icon for it; the new icon appears once that cache is refreshed."
+        "Apply completed. The folder customization was saved.`n`nAn already-open Explorer view may retain the previous folder color until refreshed. Press F5, navigate away and back, or open a new Explorer window/view to display the current color."
     }
     else {
         ('{0} completed successfully.' -f $Action)

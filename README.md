@@ -1,102 +1,119 @@
 # Portable Folder Icons
 
-Portable Folder Icons adds a nested **Folder Icons** menu to Windows Explorer
-so you can apply a bundled or custom ICO to one folder at a time. It installs
-for the current user only and uses the classic context menu available through
-**Show more options** on Windows 11.
+Give Windows folders a clear visual identity from Explorer. Portable Folder
+Icons installs a current-user **Folder Icons** submenu with ten included colors,
+custom ICO discovery, Reset, Repair, and Uninstall—without administrator rights
+or an Explorer restart.
 
-## Requirements
+![Colored folders in Windows Explorer](files/readme-assets/colored-folders-example.png)
 
-- Windows 10 or Windows 11
-- A normal, non-administrator user session
-- Inbox Windows PowerShell 5.1
+## Features
 
-Python, a virtual environment, downloads, third-party packages, administrator
-rights, and an Explorer restart are not required.
+- Ten included folder colors
+- Windows 10 and Windows 11 with inbox Windows PowerShell 5.1
+- Current-user installation: no administrator rights or UAC
+- Classic Explorer context-menu submenu
+- Custom ICO discovery and rescan
+- Safe Reset, Repair, and Uninstall actions
+- No Python, downloads, telemetry, Explorer restart, or global icon-cache deletion
 
-## Setup
+## Install
 
-1. Copy or extract the whole repository anywhere writable under your Windows
-   user profile.
+1. Download or extract the complete repository ZIP to a writable folder.
 2. Double-click `Setup_and_Run-Portable-Folder-Icons.bat`.
-3. Review the icon-results table and final installed paths, then press Enter
-   to close.
+3. Confirm the results show the expected accepted icons, then press Enter.
 
-Windows SmartScreen or workplace security software may warn about an unsigned
-download on the first run. If you trust this copy, choose **More info** and
-then **Run anyway**. The launcher refuses to run elevated; do not choose
-**Run as administrator**.
-
-Setup validates each immediate `.ico` file in `files\ICO-Files`, copies valid
-content to a SHA-256-named cache, installs a self-contained runtime under
-`%LOCALAPPDATA%\Portable-Folder-Icons`, and creates the current-user menu.
-Rerunning the batch is a safe install/update/repair/rescan operation.
+The launcher refuses elevation. If Windows SmartScreen warns about the unsigned
+download and you trust its source, choose **More info** and **Run anyway**.
+Setup installs a self-contained runtime under
+`%LOCALAPPDATA%\Portable-Folder-Icons` and registers only current-user (`HKCU`)
+menu entries.
 
 ## Use
 
-1. Right-click one normal writable folder.
-2. On Windows 11, choose **Show more options**.
-3. Open **Folder Icons** and choose an icon.
+Right-click one normal writable folder. On Windows 11, select **Show more
+options**, open **Folder Icons**, and choose a color.
 
-Apply and Reset show a short progress terminal while the customization is
-committed and the matching parent Explorer view is reloaded. That view returns
-to the same folder automatically; its selection and scroll position may reset.
-The tool never restarts Explorer or globally rebuilds the icon cache.
+![Folder Icons classic context-menu submenu](files/readme-assets/folder-icons-submenu.png)
 
-The submenu also includes:
+**Reset to Default** removes this tool's icon customization while preserving
+unrelated `desktop.ini` content. **Repair** validates the installed runtime and
+cached icons, then recreates the menu. **Uninstall** removes the menu, runtime,
+manifest, and installed settings after confirmation.
 
-- **Reset to Default** — removes only folder-icon fields while preserving
-  unrelated `desktop.ini` customization.
-- **Repair Portable Folder Icons** — validates the installed runtime,
-  manifest, and referenced cache, then recreates the menu. Repair works after
-  the repository is moved or removed, but it does not import new source icons.
-- **Uninstall Portable Folder Icons** — requires confirmation, removes the
-  menu/runtime/active manifest, and preserves hashed cached icons by default
-  so folders already using them do not break. A separate purge prompt warns
-  before cache deletion.
+### Folder colors
 
-## Add or update icons
+![Black, Blue, Gray, Green, Orange, Pink, Purple, Red, Teal, and Yellow folder icons](files/readme-assets/folder-color-gallery.png)
 
-Place immediate `.ico` files in `files\ICO-Files` and rerun the setup batch.
-Subfolders are not scanned. Labels come from filenames: `Folder_Blue.ico`
-becomes **Blue**, underscores become spaces, and other capitalization is
-preserved.
+### Add custom ICO files
 
-Invalid, empty, unreadable, or malformed ICOs are rejected individually.
-Different files that normalize to the same label are both omitted until
-renamed. Replacing or renaming a source icon does not delete the old hashed
-cache, so previously customized folders keep their icon.
+Place `.ico` files directly in `files\ICO-Files`, then rerun setup to rescan.
+Subfolders are not scanned. Filenames become menu labels: `Folder_Blue.ico`
+becomes **Blue**, and underscores become spaces. Invalid icons and duplicate
+labels are reported without replacing a working installation.
 
-## Limitations
+Previously applied folders keep working because cached icons are retained.
+Only redistribute custom icons when you have permission to do so.
 
-- One selected folder at a time; multi-selection is planned for a future
-  version.
-- Windows 10/11 local NTFS and ReFS folders only.
-- Filesystem roots, UNC/network paths, Windows system folders, protected
-  application folders, and locations you cannot write are rejected.
-- The menu is in the classic context menu, not Windows 11's first compact
-  menu.
-- The matching parent view is navigated out and back automatically to force a
-  full reload. Its window and final location are preserved, but selection,
-  scroll position, and Back history are not guaranteed.
+## Developer Mode
+
+Normal operation is silent: Apply and Reset run in a hidden PowerShell window
+and show no success dialog. Errors still display a useful dialog.
+
+To see progress and the completion or warning dialog during diagnosis, edit
+`config.toml` before running setup:
+
+```toml
+[settings]
+developer_mode = true
+```
+
+Only the TOML Boolean values `true` and `false` are accepted. Rerun setup after
+changing the value. Setup persists the effective setting in the installed
+runtime, so menu actions do not depend on the repository remaining in place.
+Repair preserves that installed setting.
+
+## Explorer refresh limitation
+
+An already-open Explorer view may retain the previous folder color until
+refreshed. Press F5, navigate away and back, or open a new Explorer window/view
+to display the current color. Reset normally updates immediately.
+
+The customization is still saved correctly. The tool does not restart Explorer
+or clear Windows' global icon cache.
 
 ## Troubleshooting
 
-- **No menu:** rerun setup normally. If the repository is unavailable, use the
-  installed Repair command.
-- **Icon rejected during setup:** read its row in the results table. Confirm it
-  is a real, readable, non-empty ICO and that its normalized label is unique.
-- **Apply reports a missing/corrupt cache:** run Repair for a precise integrity
-  report, then rerun repository setup if source icons need to be reimported.
-- **Access denied/protected folder:** choose a normal folder you own. Do not
-  elevate the launcher.
-- **Apply reports that refresh failed:** the customization was saved, but the
-  targeted Explorer reload did not complete. Reopen that parent location and
-  report the warning text.
+- **Folder Icons is missing:** rerun setup normally. If the repository is no
+  longer available, use the installed Repair command.
+- **An ICO is rejected:** check its setup-results row. It must be readable,
+  non-empty, valid, and have a unique normalized label.
+- **A color looks stale:** use F5, navigate away and back, or open a new view.
+- **A cache-integrity error appears:** run Repair, then rerun repository setup
+  if source icons must be imported again.
+- **Access is denied:** choose a local NTFS or ReFS folder you own. Filesystem
+  roots, network paths, Windows system folders, protected application folders,
+  and unwritable locations are intentionally rejected.
+
+## Uninstall
+
+Choose **Folder Icons → Uninstall Portable Folder Icons** and confirm. The
+default keeps cached icons so previously customized folders do not break.
+An additional explicit warning appears before optional cache deletion.
+Uninstall does not modify customized folders.
+
+## Privacy and security
+
+Portable Folder Icons has no telemetry and requires no internet connection,
+administrator rights, or machine-wide registry changes. It uses only
+current-user registry entries and validates cached ICO content by SHA-256.
+
+## Roadmap
+
+Multi-folder selection is planned for a future release.
 
 ## License and icon rights
 
-The code and the ten bundled ICO assets are covered by the root MIT license;
-the copyright holder has confirmed redistribution permission for those
-assets. Icons later added by individual users remain their responsibility and
-are not automatically granted redistribution rights by this repository.
+The code and ten bundled ICO assets are distributed under the root
+[MIT License](LICENSE); the copyright holder has confirmed redistribution
+permission for those assets. User-added icons remain the user's responsibility.

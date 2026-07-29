@@ -18,7 +18,7 @@ for ($attempt = 0; $attempt -lt 100; $attempt++) {
 }
 if ($null -ne (Get-Process -Id $ParentProcessId -ErrorAction SilentlyContinue)) { exit 41 }
 
-foreach ($relativePath in @('runtime', 'manifest.json')) {
+foreach ($relativePath in @('runtime', 'manifest.json', 'settings.json')) {
     $target = Join-Path $root $relativePath
     if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
 }
