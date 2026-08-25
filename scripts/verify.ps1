@@ -126,11 +126,11 @@ foreach ($iconFile in $iconFiles) {
 }
 
 $changelog = Get-Content -LiteralPath (Join-Path $repoRoot 'md-instructions\Changelog.md') -Raw
-if ($changelog -match '(?m)^## v0\.1\.0\b') {
-    Add-CheckPass 'v0.1.0 changelog entry'
+if ($changelog -match '(?m)^## v0\.1\.1\b') {
+    Add-CheckPass 'v0.1.1 changelog entry'
 }
 else {
-    Add-CheckFailure 'missing v0.1.0 changelog entry'
+    Add-CheckFailure 'missing v0.1.1 changelog entry'
 }
 
 $allowedRootNames = @(
@@ -185,12 +185,12 @@ foreach ($check in $forbiddenPatterns.GetEnumerator()) {
 }
 
 $config = Get-Content -LiteralPath (Join-Path $repoRoot 'config.toml') -Raw
-if ($config -match 'version\s*=\s*"0\.1\.0"' -and
+if ($config -match 'version\s*=\s*"0\.1\.1"' -and
     $config -match '(?ms)^\[settings\]\s*.*?^developer_mode\s*=\s*false\s*(?:#.*)?$' -and
     $config -match 'requires_python\s*=\s*false' -and
     $config -match 'windows\s*=\s*true' -and
     $config -match 'macos\s*=\s*false') {
-    Add-CheckPass 'config.toml v0.1.0 Windows-only metadata'
+    Add-CheckPass 'config.toml v0.1.1 Windows-only metadata'
 }
 else {
     Add-CheckFailure 'config.toml metadata is incomplete or inaccurate'
@@ -198,12 +198,12 @@ else {
 
 $briefing = Get-Content -LiteralPath (Join-Path $repoRoot 'md-instructions\Briefing.md') -Raw
 $readme = Get-Content -LiteralPath (Join-Path $repoRoot 'README.md') -Raw
-if ($briefing -match 'v0\.1\.0' -and $readme -match 'SmartScreen' -and
+if ($briefing -match 'v0\.1\.1' -and $readme -match 'SmartScreen' -and
     $readme -match 'Uninstall' -and $readme -match 'License and icon rights') {
-    Add-CheckPass 'required v0.1.0 documentation'
+    Add-CheckPass 'required v0.1.1 documentation'
 }
 else {
-    Add-CheckFailure 'required v0.1.0 documentation is incomplete'
+    Add-CheckFailure 'required v0.1.1 documentation is incomplete'
 }
 
 $imageLinks = @([regex]::Matches($readme, '!\[[^\]]*\]\((files/readme-assets/[^)]+)\)') |

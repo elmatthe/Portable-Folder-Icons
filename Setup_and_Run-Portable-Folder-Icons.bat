@@ -4,7 +4,7 @@ cd /d "%~dp0"
 
 cls
 echo ============================================================
-echo   Portable Folder Icons v0.1.0 - Setup / Repair / Rescan
+echo   Portable Folder Icons v0.1.1 - Setup / Repair / Rescan
 echo ============================================================
 echo.
 echo   Python and a virtual environment are not required.

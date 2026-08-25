@@ -77,7 +77,7 @@ function Read-PfiInstalledSettings {
     return $settings
 }
 
-$script:PfiVersion = '0.1.0'
+$script:PfiVersion = '0.1.1'
 $script:PfiManifestSchema = 1
 
 function ConvertTo-PfiMenuLabel {

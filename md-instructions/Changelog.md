@@ -1,5 +1,15 @@
 # Portable Folder Icons — Changelog
 
+## v0.1.1 — Unreleased
+
+### Added
+
+- Added a scalable **Choose Folder Icon** child cascade so the dynamic icon
+  collection can grow without displacing Reset, Repair, or Uninstall from the
+  short parent menu.
+- Added deterministic menu-plan coverage for zero, one, ten, the current local
+  inventory, 30, and 50 icons, including ordering and exact ownership cleanup.
+
 ## v0.1.0 — 2026-08-25
 
 ### Added

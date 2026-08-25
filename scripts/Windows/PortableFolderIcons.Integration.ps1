@@ -3,6 +3,8 @@ Set-StrictMode -Version 2.0
 $script:PfiProductionRegistryRoot = 'HKCU:\Software\Classes\Directory\shell\PortableFolderIcons'
 $script:PfiProductionSubcommandsRoot = 'HKCU:\Software\Classes\PortableFolderIcons.ContextMenu'
 $script:PfiProductionSubcommandsReference = 'PortableFolderIcons.ContextMenu'
+$script:PfiProductionIconChoicesRoot = 'HKCU:\Software\Classes\PortableFolderIcons.ContextMenu.IconChoices'
+$script:PfiProductionIconChoicesReference = 'PortableFolderIcons.ContextMenu.IconChoices'
 $script:PfiProductionDirectoryShellRoot = 'HKCU:\Software\Classes\Directory\shell'
 $script:PfiLegacyColorNames = @(
     'Black', 'Blue', 'Gray', 'Green', 'Orange',
@@ -128,12 +130,15 @@ function Get-PfiRegistryPlan {
         [string]$RegistryRoot = $script:PfiProductionRegistryRoot,
         [string]$SubcommandsRoot = $script:PfiProductionSubcommandsRoot,
         [string]$SubcommandsReference = $script:PfiProductionSubcommandsReference,
+        [string]$IconChoicesRoot = $script:PfiProductionIconChoicesRoot,
+        [string]$IconChoicesReference = $script:PfiProductionIconChoicesReference,
         [string]$PowerShellPath = (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'),
         [bool]$DeveloperMode = $false
     )
 
     if (-not $RegistryRoot.StartsWith('HKCU:\', [StringComparison]::OrdinalIgnoreCase) -or
-        -not $SubcommandsRoot.StartsWith('HKCU:\', [StringComparison]::OrdinalIgnoreCase)) {
+        -not $SubcommandsRoot.StartsWith('HKCU:\', [StringComparison]::OrdinalIgnoreCase) -or
+        -not $IconChoicesRoot.StartsWith('HKCU:\', [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Context-menu registration is restricted to HKCU.'
     }
     if ([string]::IsNullOrWhiteSpace($SubcommandsReference) -or
@@ -145,9 +150,18 @@ function Get-PfiRegistryPlan {
     if (-not $SubcommandsRoot.Equals($referencedRoot, [StringComparison]::OrdinalIgnoreCase)) {
         throw 'The submenu storage path does not match the HKCR-relative parent reference.'
     }
+    if ([string]::IsNullOrWhiteSpace($IconChoicesReference) -or
+        $IconChoicesReference.StartsWith('\') -or $IconChoicesReference.Contains(':')) {
+        throw 'The icon chooser reference must be an HKCR-relative registry path.'
+    }
+    $referencedChoicesRoot = 'HKCU:\Software\Classes\' + $IconChoicesReference.TrimStart('\')
+    if (-not $IconChoicesRoot.Equals($referencedChoicesRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'The icon chooser storage path does not match its HKCR-relative reference.'
+    }
     $runtimeScript = Join-Path (Join-Path $InstallRoot 'runtime') 'Invoke-PortableFolderIcons.ps1'
     $hiddenLauncher = Join-Path (Join-Path $InstallRoot 'runtime') 'Invoke-PortableFolderIcons.Hidden.vbs'
     $subcommandsShell = Join-Path $SubcommandsRoot 'shell'
+    $iconChoicesShell = Join-Path $IconChoicesRoot 'shell'
     $plan = New-Object System.Collections.Generic.List[object]
 
     $plan.Add((New-PfiRegistryValue $RegistryRoot 'MUIVerb' 'Folder Icons'))
@@ -158,6 +172,12 @@ function Get-PfiRegistryPlan {
     $accepted = @($Manifest.entries |
         Where-Object validationState -eq 'Accepted' |
         Sort-Object @{ Expression = { $_.menuLabel }; Ascending = $true })
+    if ($accepted.Count -gt 0) {
+        $chooserPath = Join-Path $subcommandsShell 'Choice_0100_Icons'
+        $plan.Add((New-PfiRegistryValue $chooserPath 'MUIVerb' 'Choose Folder Icon'))
+        $plan.Add((New-PfiRegistryValue $chooserPath 'Icon' 'shell32.dll,3'))
+        $plan.Add((New-PfiRegistryValue $chooserPath 'ExtendedSubCommandsKey' $IconChoicesReference))
+    }
     $ordinal = 0
     foreach ($entry in $accepted) {
         if ([string]::IsNullOrWhiteSpace([string]$entry.menuLabel) -or
@@ -166,7 +186,7 @@ function Get-PfiRegistryPlan {
         }
         $ordinal++
         $verbName = 'Icon_{0:D4}_{1}' -f $ordinal, ([string]$entry.hash).ToLowerInvariant()
-        $verbPath = Join-Path $subcommandsShell $verbName
+        $verbPath = Join-Path $iconChoicesShell $verbName
         $cachedIcon = Join-Path (Join-Path $InstallRoot 'icons') ([string]$entry.cachedFilename)
         $command = New-PfiActionCommand $PowerShellPath $runtimeScript Apply ([string]$entry.hash) `
             -IncludeTarget -DeveloperMode $DeveloperMode -HiddenLauncherPath $hiddenLauncher
@@ -201,12 +221,14 @@ function Test-PfiApprovedRegistryRoots {
     param(
         [string]$RegistryRoot,
         [string]$SubcommandsRoot,
+        [string]$IconChoicesRoot,
         [string]$DirectoryShellRoot
     )
 
     $production = (
         $RegistryRoot.Equals($script:PfiProductionRegistryRoot, [StringComparison]::OrdinalIgnoreCase) -and
         $SubcommandsRoot.Equals($script:PfiProductionSubcommandsRoot, [StringComparison]::OrdinalIgnoreCase) -and
+        $IconChoicesRoot.Equals($script:PfiProductionIconChoicesRoot, [StringComparison]::OrdinalIgnoreCase) -and
         $DirectoryShellRoot.Equals($script:PfiProductionDirectoryShellRoot, [StringComparison]::OrdinalIgnoreCase)
     )
     $testPrefix = 'HKCU:\Software\PortableFolderIcons\Tests\'
@@ -214,6 +236,7 @@ function Test-PfiApprovedRegistryRoots {
     $test = (
         $RegistryRoot.StartsWith($testPrefix, [StringComparison]::OrdinalIgnoreCase) -and
         $SubcommandsRoot.StartsWith($testClassesPrefix, [StringComparison]::OrdinalIgnoreCase) -and
+        $IconChoicesRoot.StartsWith($testClassesPrefix, [StringComparison]::OrdinalIgnoreCase) -and
         $DirectoryShellRoot.StartsWith($testPrefix, [StringComparison]::OrdinalIgnoreCase)
     )
     return ($production -or $test)
@@ -265,26 +288,33 @@ function Register-PfiContextMenu {
         [string]$RegistryRoot = $script:PfiProductionRegistryRoot,
         [string]$SubcommandsRoot = $script:PfiProductionSubcommandsRoot,
         [string]$SubcommandsReference = $script:PfiProductionSubcommandsReference,
+        [string]$IconChoicesRoot = $script:PfiProductionIconChoicesRoot,
+        [string]$IconChoicesReference = $script:PfiProductionIconChoicesReference,
         [string]$DirectoryShellRoot = $script:PfiProductionDirectoryShellRoot,
         [bool]$DeveloperMode = $false
     )
 
-    if (-not (Test-PfiApprovedRegistryRoots $RegistryRoot $SubcommandsRoot $DirectoryShellRoot)) {
+    if (-not (Test-PfiApprovedRegistryRoots $RegistryRoot $SubcommandsRoot $IconChoicesRoot $DirectoryShellRoot)) {
         throw 'Refusing to replace registry keys outside approved tool-owned roots.'
     }
     $plan = @(Get-PfiRegistryPlan -Manifest $Manifest -InstallRoot $InstallRoot `
         -RegistryRoot $RegistryRoot -SubcommandsRoot $SubcommandsRoot `
-        -SubcommandsReference $SubcommandsReference -DeveloperMode $DeveloperMode)
+        -SubcommandsReference $SubcommandsReference -IconChoicesRoot $IconChoicesRoot `
+        -IconChoicesReference $IconChoicesReference -DeveloperMode $DeveloperMode)
     if (-not $PSCmdlet.ShouldProcess($RegistryRoot, 'Replace Portable Folder Icons context menu')) {
         return $plan
     }
     [void](Assert-PfiRegistryPath -RegistryPath $RegistryRoot -OwnedRoot $RegistryRoot -AllowRoot)
     [void](Assert-PfiRegistryPath -RegistryPath $SubcommandsRoot -OwnedRoot $SubcommandsRoot -AllowRoot)
+    [void](Assert-PfiRegistryPath -RegistryPath $IconChoicesRoot -OwnedRoot $IconChoicesRoot -AllowRoot)
     if (Test-Path -LiteralPath $RegistryRoot) {
         Remove-Item -LiteralPath $RegistryRoot -Recurse -Force
     }
     if (Test-Path -LiteralPath $SubcommandsRoot) {
         Remove-Item -LiteralPath $SubcommandsRoot -Recurse -Force
+    }
+    if (Test-Path -LiteralPath $IconChoicesRoot) {
+        Remove-Item -LiteralPath $IconChoicesRoot -Recurse -Force
     }
     foreach ($item in $plan) {
         if (-not (Test-Path -LiteralPath $item.Path)) {
@@ -308,13 +338,14 @@ function Remove-PfiContextMenu {
     param(
         [string]$RegistryRoot = $script:PfiProductionRegistryRoot,
         [string]$SubcommandsRoot = $script:PfiProductionSubcommandsRoot,
+        [string]$IconChoicesRoot = $script:PfiProductionIconChoicesRoot,
         [string]$DirectoryShellRoot = $script:PfiProductionDirectoryShellRoot
     )
 
-    if (-not (Test-PfiApprovedRegistryRoots $RegistryRoot $SubcommandsRoot $DirectoryShellRoot)) {
+    if (-not (Test-PfiApprovedRegistryRoots $RegistryRoot $SubcommandsRoot $IconChoicesRoot $DirectoryShellRoot)) {
         throw 'Refusing to remove registry keys outside approved tool-owned roots.'
     }
-    foreach ($ownedRoot in @($RegistryRoot, $SubcommandsRoot)) {
+    foreach ($ownedRoot in @($RegistryRoot, $SubcommandsRoot, $IconChoicesRoot)) {
         if ($PSCmdlet.ShouldProcess($ownedRoot, 'Remove Portable Folder Icons context menu') -and
             (Test-Path -LiteralPath $ownedRoot)) {
             Remove-Item -LiteralPath $ownedRoot -Recurse -Force

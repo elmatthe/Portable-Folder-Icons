@@ -7,7 +7,7 @@ developer_mode = false
 [project]
 name = "Portable-Folder-Icons"
 display_name = "Portable Folder Icons"
-version = "0.1.0"
+version = "0.1.1"
 description = "Current-user Windows folder-icon context menu with a stable local cache."
 author = "elmatthe"
 license = "MIT"

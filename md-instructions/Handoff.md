@@ -2,12 +2,22 @@
 
 ## Current Focus
 
-v0.1.0 was manually accepted and merged to `main` as commit `1362fe1` on
-2026-07-29. Local and origin `main` agree, the merge contains the exact final
-`feature/v0.1.0-portable-folder-icons` tree, and the full verification gate
-passed against a clean detached checkout of that merge on 2026-08-25. Formal
-tag and GitHub release publication are the remaining v0.1.0 reconciliation
-steps before v0.1.1 begins.
+v0.1.0 is formally complete. Local `main`, `origin/main`, annotated tag
+`v0.1.0`, and the GitHub release all identify verified release commit
+`6cb6bae`. The exact commit passed 265 deterministic assertions and all release
+gates under Windows PowerShell 5.1.
+
+v0.1.1 began from that exact SHA on `feature/v0.1.1`. Starting inventory: ten
+tracked redistribution-approved ICOs plus seven preserved untracked ICOs
+(`CSPW`, `ai`, `code`, `excel`, `markdown`, `python`, and `root`) and one
+untracked source PNG. Redistribution approval for the seven added ICOs remains
+a final publication gate; they must not be committed merely for local testing.
+Phase 0 and Phase 1 are complete. Microsoft documentation confirms the
+static cascade has no independently scrollable/pinned region; ADR 011 records
+the fallback. Deterministic tests cover zero/one/ten/current/30/50 inventories,
+ordering, one Apply per accepted icon, utility placement, Repair reconstruction,
+and exact cleanup. The full Windows PowerShell 5.1 gate passes with all 17
+current local ICOs validated. Multi-target transport research is next.
 
 The accepted Explorer limitation is: an already-open Explorer view may retain
 the previous folder color until refreshed. Press F5, navigate away and back,
@@ -109,6 +119,20 @@ cache; it is forbidden here and was not implemented.
 ---
 
 ## Work Log (newest first)
+
+- 2026-08-25 — Phase 1 scalable-menu implementation. Replaced the unbounded
+  one-popup layout with a short parent whose **Choose Folder Icon** child owns
+  every dynamic alphabetical Apply verb while Reset, Repair, and Uninstall
+  remain parent siblings. Added a separately owned HKCU icon-choice store,
+  exact registration/removal guards, and deterministic zero/one/ten/current/
+  30/50 inventory tests. No COM extension was added. — Codex
+
+- 2026-08-25 — Formally published v0.1.0 from verified commit `6cb6bae`:
+  pushed `main`, created/pushed annotated tag `v0.1.0`, and published GitHub
+  release `Portable Folder Icons v0.1.0`. Verified local main, origin main,
+  local tag, remote tag, and release target. Created `feature/v0.1.1` from the
+  exact release SHA, inventoried ten tracked and seven untracked ICOs, preserved
+  all local assets, and advanced project version state to 0.1.1. — Codex
 
 - 2026-08-25 — Reconciled the formal v0.1.0 release state. Confirmed local and
   origin `main` at merge commit `1362fe1`, confirmed the historical feature

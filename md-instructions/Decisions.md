@@ -5,6 +5,25 @@ entries appear first.
 
 ---
 
+## 011 — Isolate dynamic icons in a nested static chooser — 2026-08-25 — Codex
+
+**Status:** Accepted
+**Context:** The expanded and future ICO inventory can exceed screen height.
+Microsoft's static `ExtendedSubCommandsKey` model defines one ordered popup and
+separator flags, but no independently scrolling region whose sibling commands
+remain pinned inside the same popup.
+**Decision:** Keep the classic registry architecture and make the root
+**Folder Icons** popup short: one **Choose Folder Icon** child cascade followed
+by Reset, Repair, and Uninstall. Store dynamic Apply verbs only beneath the
+child cascade, alphabetically and without a hardcoded count. Omit the empty
+chooser when no icon is accepted while retaining all utilities.
+**Alternatives considered:** A visually pinned footer would require behavior
+the static menu contract does not expose. A COM shell extension solely for this
+appearance would add deployment, signing, security, and maintenance cost.
+**Consequences:** Native overflow affects only the icon-choice popup. The
+utility commands remain immediately accessible, and Repair/Uninstall own and
+replace/remove both exact project-owned cascade stores.
+
 ## 010 — Default-silent actions with opt-in Developer Mode — 2026-07-29 — Codex
 
 **Status:** Accepted for implementation; awaiting manual acceptance

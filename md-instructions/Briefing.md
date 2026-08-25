@@ -56,12 +56,12 @@ that repository path.
 
 ## Current Version
 
-v0.1.0
+v0.1.1 (in development)
 
 ## High-Level State
 
-v0.1.0 was manually accepted and merged to `main` on 2026-07-29. Its formal
-release is dated 2026-08-25. An already-open Explorer view may retain the
+v0.1.0 was manually accepted, merged, and formally released. Focused v0.1.1
+implementation is active on `feature/v0.1.1`. An already-open Explorer view may retain the
 previous folder color until refreshed; F5, navigating away and back, or opening
 a new view displays the current color, while Reset normally updates
 immediately. See `Handoff.md` for live development state.
