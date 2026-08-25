@@ -17,7 +17,20 @@ static cascade has no independently scrollable/pinned region; ADR 011 records
 the fallback. Deterministic tests cover zero/one/ten/current/30/50 inventories,
 ordering, one Apply per accepted icon, utility placement, Repair reconstruction,
 and exact cleanup. The full Windows PowerShell 5.1 gate passes with all 17
-current local ICOs validated. Multi-target transport research is next.
+current local ICOs validated.
+
+Phase 2 is paused at an architecture approval gate. Microsoft's legacy static
+verb contract exposes a single `%1` path and its `MultiSelectModel=Player` is
+still capped by Explorer at 100 selections. Separate per-item process launches
+plus a timed file queue cannot prove original selection order, reliably delimit
+two concurrent invocations, or produce one trustworthy aggregate result.
+Command-line aggregation also reintroduces truncation. Microsoft's supported
+lossless selection transports are COM-based `IExecuteCommand` plus
+`IObjectWithSelection` (`IShellItemArray`) or `IDropTarget` (`IDataObject`);
+COM Player verbs have no Explorer selection-count cap. Adopting one requires a
+compiled per-user COM component and materially expands deployment, signing,
+security, Repair, and Uninstall scope. No such component has been implemented
+without explicit user approval.
 
 The accepted Explorer limitation is: an already-open Explorer view may retain
 the previous folder color until refreshed. Press F5, navigate away and back,
@@ -119,6 +132,16 @@ cache; it is forbidden here and was not implemented.
 ---
 
 ## Work Log (newest first)
+
+- 2026-08-25 — Phase 2 transport research gate. Microsoft documents `%1` as
+  the static command path placeholder, caps legacy Player verbs at 100 items,
+  and identifies `IObjectWithSelection`/`IShellItemArray` or `IDropTarget`/
+  `IDataObject` as the supported lossless multi-selection transports. Rejected
+  an undocumented `%*` command line and a timing-based multi-process queue:
+  neither can guarantee no truncation/reordering plus one aggregate result.
+  A compiled current-user COM integration is therefore the narrow supported
+  route, but is a material architecture expansion requiring user approval.
+  Implementation stopped at this gate. — Codex
 
 - 2026-08-25 — Phase 1 scalable-menu implementation. Replaced the unbounded
   one-popup layout with a short parent whose **Choose Folder Icon** child owns
@@ -406,6 +429,15 @@ cache; it is forbidden here and was not implemented.
 ---
 
 ## Session Sync Log (newest first)
+
+### 2026-08-25 — Machine: current Windows workspace — Phase 1 and Phase 2 gate
+
+- Committed/pushed: `d6b27b9` on `feature/v0.1.1`, establishing version 0.1.1
+  and the scalable nested static chooser with dynamic inventory tests.
+- Verified: complete Windows PowerShell 5.1 gate passes with all 17 current
+  local ICOs; seven new ICOs remain untracked pending redistribution approval.
+- Blocked for user decision: safe unlimited multi-folder transport requires a
+  compiled per-user COM selection handler; no compiled component was added.
 
 ### 2026-08-25 — Machine: current Windows workspace — v0.1.0 release reconciliation
 
