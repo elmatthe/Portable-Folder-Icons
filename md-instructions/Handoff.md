@@ -2,30 +2,25 @@
 
 ## Current Focus
 
-Release preparation is complete on `feature/v0.1.0-portable-folder-icons`,
-which remains unmerged. The user manually accepted setup, the classic cascade,
-sequential Apply behavior, and Reset for v0.1.0.
+v0.1.0 was manually accepted and merged to `main` as commit `1362fe1` on
+2026-07-29. Local and origin `main` agree, the merge contains the exact final
+`feature/v0.1.0-portable-folder-icons` tree, and the full verification gate
+passed against a clean detached checkout of that merge on 2026-08-25. Formal
+tag and GitHub release publication are the remaining v0.1.0 reconciliation
+steps before v0.1.1 begins.
 
 The accepted Explorer limitation is: an already-open Explorer view may retain
 the previous folder color until refreshed. Press F5, navigate away and back,
 or open a new Explorer window/view to display the current color. Reset normally
 updates immediately. Do not reopen the refresh-system design for v0.1.0.
 
-Apply and Reset now run silently by default. Setting
+Apply and Reset run silently by default. Setting
 `[settings] developer_mode = true` in `config.toml` before rerunning setup
 restores their progress terminal and completion/warning dialog. Errors remain
 visible in both modes. Setup persists the strict Boolean in installed
 `settings.json`; Repair reuses it, rollback preserves it, and Uninstall removes
-it. This new Developer Mode behavior still requires manual acceptance before
-merge.
-
-The first manual Developer Mode test found one remaining normal-mode defect:
-`powershell.exe -WindowStyle Hidden` flashed a console before PowerShell could
-hide it. Normal Apply/Reset now route through the installed
-`Invoke-PortableFolderIcons.Hidden.vbs` using `wscript.exe`; the launcher
-creates no console, waits for the dispatcher, and transports the selected path
-as UTF-16 hex. Developer Mode retains the direct visible PowerShell command.
-This correction is automated-test complete but awaits the user's visual retest.
+it. The final windowless-launch correction and Developer Mode behavior were
+included in the manually approved merge.
 
 The fifth investigation into the stale-icon defect measured what Explorer
 **actually paints**, by capturing the live window with `PrintWindow` and
@@ -43,8 +38,7 @@ two real defects, but it also established a genuine Windows limitation:
   supported non-invasive mechanism was found that makes an already-open view
   repaint a *changed* custom icon promptly. See "Explorer icon cache" below.
 
-The rendered icon behavior has user acceptance. Developer Mode is the only
-remaining manual acceptance gate before merge.
+The v0.1.0 rendered-icon and Developer Mode behavior have user acceptance.
 
 ---
 
@@ -103,7 +97,7 @@ cache; it is forbidden here and was not implemented.
 
 | # | Severity | File | Description | Status | Found by |
 |---|----------|------|-------------|--------|----------|
-| 1 | Critical | Apply / generated resources | Apply deleted the superseded ICO while Explorer was still resolving it. The icon then resolved to nothing, Explorer cached "no customization", and the folder showed the plain default icon permanently. Every resource a folder has used is now retained until Reset reclaims them. | Fixed / awaiting user retest | Claude |
+| 1 | Critical | Apply / generated resources | Apply deleted the superseded ICO while Explorer was still resolving it. The icon then resolved to nothing, Explorer cached "no customization", and the folder showed the plain default icon permanently. Every resource a folder has used is now retained until Reset reclaims them. | Fixed / manually accepted | Claude |
 | 1a | Known limitation | Explorer icon cache | With a warm cache, an already-open Explorer view keeps painting the previous custom icon after Apply. No supported non-invasive mechanism was found that changes this; see "Explorer icon cache" above for the measured evidence. Opening a new window on the folder shows the current icon. | Documented, not solvable under current constraints | Claude |
 | 1b | Major | Explorer refresh reporting | `RefreshSucceeded` was computed only from the notification count, so a run that matched a view and reloaded none of them still reported success. It now requires every matched view to have been reloaded, and reports `ViewReloadPerformed` separately. | Fixed | Claude |
 | 1c | Major | Explorer refresh navigation | If the outbound leg of the away-and-back reload failed or timed out, the view was left stranded at the temporary parent. The return leg is now in a `finally` block. | Fixed | Claude |
@@ -115,6 +109,15 @@ cache; it is forbidden here and was not implemented.
 ---
 
 ## Work Log (newest first)
+
+- 2026-08-25 — Reconciled the formal v0.1.0 release state. Confirmed local and
+  origin `main` at merge commit `1362fe1`, confirmed the historical feature
+  branch tree is identical, confirmed GitHub had no tags or releases, and ran
+  the complete Windows PowerShell 5.1 gate in a clean detached checkout of the
+  exact merge: 265 assertions passed, all ten release ICOs validated, and every
+  structural/security check passed. Corrected stale release documentation and
+  retired the fulfilled v0.1.0 temporary implementation drop. Formal tag and
+  GitHub release publication remain next. — Codex
 
 - 2026-07-29 — Corrected the normal-mode console flash found during manual
   acceptance. Added and staged `Invoke-PortableFolderIcons.Hidden.vbs`, changed
@@ -379,6 +382,16 @@ cache; it is forbidden here and was not implemented.
 ---
 
 ## Session Sync Log (newest first)
+
+### 2026-08-25 — Machine: current Windows workspace — v0.1.0 release reconciliation
+
+- Changed: `md-instructions/Briefing.md`, `md-instructions/Changelog.md`, and
+  `md-instructions/Handoff.md` to record the completed v0.1.0 merge, manual
+  acceptance, release date, and clean exact-commit verification.
+- Deleted: the fulfilled temporary
+  `md-instructions/Portable-Folder-Icons-v0.1.0-Implementation-Plan.md`.
+- Preserved locally and untracked: seven added ICO files, `files/PNGs`, and
+  `md-instructions/need-to-do-this`; none are part of v0.1.0.
 
 ### 2026-07-28 — Machine: G6-PF5DSHVY — versioned resource and full-tab reload repair
 

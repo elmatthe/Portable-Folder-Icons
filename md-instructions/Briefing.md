@@ -60,9 +60,8 @@ v0.1.0
 
 ## High-Level State
 
-The v0.1.0 icon behavior was manually accepted. An already-open Explorer view
-may retain the previous folder color until refreshed; F5, navigating away and
-back, or opening a new view displays the current color, while Reset normally
-updates immediately. Release documentation and default-silent Developer Mode
-are being finalized; Developer Mode still requires manual acceptance before
-merge. See `Handoff.md` for live details.
+v0.1.0 was manually accepted and merged to `main` on 2026-07-29. Its formal
+release is dated 2026-08-25. An already-open Explorer view may retain the
+previous folder color until refreshed; F5, navigating away and back, or opening
+a new view displays the current color, while Reset normally updates
+immediately. See `Handoff.md` for live development state.
