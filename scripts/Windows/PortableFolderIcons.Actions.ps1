@@ -651,3 +651,106 @@ function Invoke-PfiReset {
         Refresh = $refresh
     }
 }
+
+function Invoke-PfiBatchAction {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Apply', 'Reset')]
+        [string]$Action,
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]]$TargetPath,
+        [string]$IconHash,
+        [Parameter(Mandatory = $true)][string]$InstallRoot,
+        [switch]$SkipRefresh,
+        [scriptblock]$RefreshAction
+    )
+
+    $results = New-Object System.Collections.Generic.List[object]
+    $attempted = 0
+    $succeeded = 0
+    $failed = 0
+    $rejected = 0
+    $refreshWarnings = 0
+    $index = 0
+    foreach ($inputPath in @($TargetPath)) {
+        $index++
+        $resolved = $null
+        try {
+            $resolved = Assert-PfiCustomizableFolder @($inputPath)
+        }
+        catch {
+            $rejected++
+            $results.Add([pscustomobject][ordered]@{
+                Index = $index
+                InputPath = [string]$inputPath
+                Folder = ''
+                Status = 'Rejected'
+                Reason = $_.Exception.Message
+                RefreshSucceeded = $false
+                ActionResult = $null
+            })
+            Write-Warning ('[{0}/{1}] Rejected: {2} — {3}' -f
+                $index, @($TargetPath).Count, [string]$inputPath, $_.Exception.Message)
+            continue
+        }
+
+        $attempted++
+        try {
+            $actionResult = if ($Action -eq 'Apply') {
+                Invoke-PfiApply -TargetPath @($resolved) -IconHash $IconHash `
+                    -InstallRoot $InstallRoot -SkipRefresh:$SkipRefresh `
+                    -RefreshAction $RefreshAction
+            }
+            else {
+                Invoke-PfiReset -TargetPath @($resolved) -InstallRoot $InstallRoot `
+                    -SkipRefresh:$SkipRefresh -RefreshAction $RefreshAction
+            }
+            $succeeded++
+            $status = 'Succeeded'
+            $reason = ''
+            if (-not $actionResult.RefreshSucceeded) {
+                $refreshWarnings++
+                $status = 'SucceededWithRefreshWarning'
+                $reason = 'The folder customization was saved, but Explorer could not be refreshed automatically.'
+            }
+            $results.Add([pscustomobject][ordered]@{
+                Index = $index
+                InputPath = [string]$inputPath
+                Folder = [string]$actionResult.Folder
+                Status = $status
+                Reason = $reason
+                RefreshSucceeded = [bool]$actionResult.RefreshSucceeded
+                ActionResult = $actionResult
+            })
+            Write-Host ('[{0}/{1}] {2}: {3}' -f $index, @($TargetPath).Count, $status, $resolved)
+        }
+        catch {
+            $failed++
+            $results.Add([pscustomobject][ordered]@{
+                Index = $index
+                InputPath = [string]$inputPath
+                Folder = [string]$resolved
+                Status = 'Failed'
+                Reason = $_.Exception.Message
+                RefreshSucceeded = $false
+                ActionResult = $null
+            })
+            Write-Warning ('[{0}/{1}] Failed: {2} — {3}' -f
+                $index, @($TargetPath).Count, $resolved, $_.Exception.Message)
+        }
+    }
+
+    return [pscustomobject][ordered]@{
+        Action = $Action
+        SelectedCount = @($TargetPath).Count
+        AttemptedCount = $attempted
+        SuccessCount = $succeeded
+        FailureCount = $failed
+        RejectedCount = $rejected
+        RefreshWarningCount = $refreshWarnings
+        AllSucceeded = ($failed -eq 0 -and $rejected -eq 0 -and $refreshWarnings -eq 0)
+        Results = $results.ToArray()
+    }
+}

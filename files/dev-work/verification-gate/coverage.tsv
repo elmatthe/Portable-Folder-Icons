@@ -1,0 +1,25 @@
+# Required functionality, mapped to checks in checks.tsv. Fields are separated by TAB.
+#
+# id	required(yes|no)	platforms(all|windows|macos)	description	check_ids(comma separated, or -)	exception
+#
+# exception is - when there is none, NA:<reason> when not applicable, or
+# EX-id|rationale|approved_by|approval_ref|expires-YYYY-MM-DD for a user-approved exception.
+# Agents may propose an exception; only the user can approve one.
+# MANUAL rows are optional here because no automated check can observe Explorer; see MANUAL-GATES.md.
+PFI-001	yes	windows	Setup imports every valid ICO into the hashed cache and writes manifest and settings	c-0001,c-0003	-
+PFI-002	yes	windows	Classic menu: short parent, one Choose Folder Icon cascade, Reset/Repair/Uninstall outside it, exact HKCU ownership	c-0001,c-0003	-
+PFI-003	yes	windows	Apply writes only icon fields, preserves unrelated desktop.ini content and recovers on failure	c-0001	-
+PFI-004	yes	windows	Reset removes icon fields, reclaims generated resources and returns fresh-process Shell resolution to default	c-0001,c-0003	-
+PFI-005	yes	windows	Batch Apply/Reset keeps order and occurrences and reports one aggregate result	c-0001,c-0003	-
+PFI-006	yes	windows	Selection broker registration-derived initialization and native ABI on x64 and x86	c-0002	-
+PFI-007	yes	windows	Repair validates installed resources offline and never reports false success	c-0001,c-0003	-
+PFI-008	yes	windows	Ordinary Uninstall removes runtime and registration and preserves cache and applied resources	c-0001,c-0003	-
+PFI-009	yes	windows	Public distribution ships exactly the ten colour ICOs and never a personal ICO	c-0005	-
+PFI-010	no	windows	Installed x64 COM Apply/Reset dispatch on fresh fixtures (opt-in)	c-0004	-
+PFI-M01	no	windows	MANUAL Explorer: every chooser icon reachable and utilities accessible at the current icon count	-	-
+PFI-M02	no	windows	MANUAL Explorer: Reset to Default renders the default icon in a fresh view and in a warm open view	-	-
+PFI-M03	no	windows	MANUAL Explorer: Repair from the menu with one and with several folders selected	-	-
+PFI-M04	no	windows	MANUAL Explorer: Uninstall prompts with several folders selected (observe only; cancel)	-	-
+PFI-011	yes	windows	Repository contract: required files, root layout, script parsing, every ICO, docs, security scan, whitespace (scripts\verify.ps1)	c-0006	-
+PFI-012	yes	windows	Native verification infrastructure: harness built once per input set and reused, never a stale or tampered build; no false PASS from nonzero exits, crashes, denied or missing launches; NOT RUN, BLOCKED and FAIL kept distinct; every entrypoint withholds native launches unless explicitly authorized	c-0007,c-0001,c-0006	-
+PFI-013	yes	windows	Gate output housekeeping removes only unretained generated run evidence inside the ignored outputs folder; refuses links, unexpected roots and unsafe names; keeps RETAIN.md folders, possibly active runs and loose files	c-0008	-

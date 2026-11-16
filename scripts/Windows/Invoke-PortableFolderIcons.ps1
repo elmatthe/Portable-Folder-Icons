@@ -1,11 +1,12 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
     [ValidateSet('Apply', 'Reset', 'Repair', 'Uninstall')]
     [string]$Action,
     [string]$IconHash,
     [string[]]$TargetPath,
-    [string]$TargetPathHex
+    [string]$TargetPathHex,
+    [string]$SelectionToken,
+    [string]$PayloadHash
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,11 +14,80 @@ Set-StrictMode -Version 2.0
 
 $installRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'PortableFolderIcons.Core.ps1')
+. (Join-Path $PSScriptRoot 'PortableFolderIcons.Selection.ps1')
 . (Join-Path $PSScriptRoot 'PortableFolderIcons.Integration.ps1')
 . (Join-Path $PSScriptRoot 'PortableFolderIcons.Actions.ps1')
 . (Join-Path $PSScriptRoot 'PortableFolderIcons.Maintenance.ps1')
 
 try {
+    $selectionMode = (
+        -not [string]::IsNullOrEmpty($SelectionToken) -or
+        -not [string]::IsNullOrEmpty($PayloadHash)
+    )
+    if ($selectionMode) {
+        if ([string]::IsNullOrEmpty($SelectionToken) -or
+            [string]::IsNullOrEmpty($PayloadHash)) {
+            throw 'The Explorer selection token and payload hash must be supplied together.'
+        }
+        foreach ($legacyParameter in @('Action', 'IconHash', 'TargetPath', 'TargetPathHex')) {
+            if ($PSBoundParameters.ContainsKey($legacyParameter)) {
+                throw 'The Explorer selection payload cannot be combined with legacy action arguments.'
+            }
+        }
+        $payload = $null
+        try {
+            $payload = Read-PfiSelectionPayload -InstallRoot $installRoot `
+                -SelectionToken $SelectionToken -PayloadHash $PayloadHash
+            $installedSettings = Read-PfiInstalledSettings (Join-Path $installRoot 'settings.json')
+            $developerMode = [bool]$installedSettings.developerMode
+            $batchResult = Invoke-PfiBatchAction -Action $payload.Action `
+                -TargetPath $payload.Paths -IconHash $payload.IconHash -InstallRoot $installRoot
+        }
+        finally {
+            if (Test-Path -LiteralPath (Get-PfiSelectionPayloadPath $installRoot $SelectionToken)) {
+                [void](Remove-PfiSelectionPayload $installRoot $SelectionToken)
+            }
+        }
+        if (-not $developerMode -and $batchResult.AllSucceeded) { exit 0 }
+
+        $summary = Format-PfiAggregateResult $batchResult
+        if ($developerMode -and $batchResult.AllSucceeded -and $payload.Action -eq 'Apply') {
+            $summary += "`r`n`r`nAn already-open Explorer view may retain the previous folder color until refreshed. Press F5, navigate away and back, or open a new Explorer window/view."
+        }
+        Add-Type -AssemblyName PresentationFramework
+        $window = New-Object Windows.Window
+        $window.Title = 'Portable Folder Icons'
+        $window.Width = 760
+        $window.Height = 520
+        $window.MinWidth = 520
+        $window.MinHeight = 320
+        $window.WindowStartupLocation = [Windows.WindowStartupLocation]::CenterScreen
+        $panel = New-Object Windows.Controls.DockPanel
+        $panel.Margin = '14'
+        $button = New-Object Windows.Controls.Button
+        $button.Content = 'OK'
+        $button.Width = 90
+        $button.Height = 28
+        $button.Margin = '0,12,0,0'
+        $button.HorizontalAlignment = [Windows.HorizontalAlignment]::Right
+        $button.Add_Click({ $window.DialogResult = $true })
+        [Windows.Controls.DockPanel]::SetDock($button, [Windows.Controls.Dock]::Bottom)
+        [void]$panel.Children.Add($button)
+        $details = New-Object Windows.Controls.TextBox
+        $details.Text = $summary
+        $details.IsReadOnly = $true
+        $details.TextWrapping = [Windows.TextWrapping]::Wrap
+        $details.VerticalScrollBarVisibility = [Windows.Controls.ScrollBarVisibility]::Auto
+        $details.HorizontalScrollBarVisibility = [Windows.Controls.ScrollBarVisibility]::Auto
+        [void]$panel.Children.Add($details)
+        $window.Content = $panel
+        [void]$window.ShowDialog()
+        if ($batchResult.FailureCount -gt 0 -or $batchResult.RejectedCount -gt 0) { exit 1 }
+        exit 0
+    }
+    if ([string]::IsNullOrWhiteSpace($Action)) {
+        throw 'An action is required.'
+    }
     if (-not [string]::IsNullOrEmpty($TargetPathHex)) {
         if ($TargetPathHex -notmatch '^(?:[0-9A-Fa-f]{4})+$') {
             throw 'The windowless launcher supplied an invalid target path.'

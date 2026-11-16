@@ -6,6 +6,9 @@ $script:PfiProductionSubcommandsReference = 'PortableFolderIcons.ContextMenu'
 $script:PfiProductionIconChoicesRoot = 'HKCU:\Software\Classes\PortableFolderIcons.ContextMenu.IconChoices'
 $script:PfiProductionIconChoicesReference = 'PortableFolderIcons.ContextMenu.IconChoices'
 $script:PfiProductionDirectoryShellRoot = 'HKCU:\Software\Classes\Directory\shell'
+$script:PfiProductionSelectionBrokerClsidRoot = 'HKCU:\Software\Classes\CLSID\' + $script:PfiSelectionBrokerClsid
+$script:PfiSelectionBrokerOwner = 'Portable-Folder-Icons.SelectionBroker'
+$script:PfiResetVerbName = 'Utility_0100_Reset'
 $script:PfiLegacyColorNames = @(
     'Black', 'Blue', 'Gray', 'Green', 'Orange',
     'Pink', 'Purple', 'Red', 'Teal', 'Yellow'
@@ -132,13 +135,16 @@ function Get-PfiRegistryPlan {
         [string]$SubcommandsReference = $script:PfiProductionSubcommandsReference,
         [string]$IconChoicesRoot = $script:PfiProductionIconChoicesRoot,
         [string]$IconChoicesReference = $script:PfiProductionIconChoicesReference,
+        [string]$SelectionBrokerClsidRoot = $script:PfiProductionSelectionBrokerClsidRoot,
+        [Parameter(Mandatory = $true)][string]$SelectionBrokerHash,
         [string]$PowerShellPath = (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'),
         [bool]$DeveloperMode = $false
     )
 
     if (-not $RegistryRoot.StartsWith('HKCU:\', [StringComparison]::OrdinalIgnoreCase) -or
         -not $SubcommandsRoot.StartsWith('HKCU:\', [StringComparison]::OrdinalIgnoreCase) -or
-        -not $IconChoicesRoot.StartsWith('HKCU:\', [StringComparison]::OrdinalIgnoreCase)) {
+        -not $IconChoicesRoot.StartsWith('HKCU:\', [StringComparison]::OrdinalIgnoreCase) -or
+        -not $SelectionBrokerClsidRoot.StartsWith('HKCU:\Software\Classes\CLSID\', [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Context-menu registration is restricted to HKCU.'
     }
     if ([string]::IsNullOrWhiteSpace($SubcommandsReference) -or
@@ -160,12 +166,17 @@ function Get-PfiRegistryPlan {
     }
     $runtimeScript = Join-Path (Join-Path $InstallRoot 'runtime') 'Invoke-PortableFolderIcons.ps1'
     $hiddenLauncher = Join-Path (Join-Path $InstallRoot 'runtime') 'Invoke-PortableFolderIcons.Hidden.vbs'
+    $selectionBroker = Join-Path (Join-Path (Join-Path $InstallRoot 'runtime') 'SelectionHandler') `
+        'PortableFolderIcons.SelectionBroker.exe'
     $subcommandsShell = Join-Path $SubcommandsRoot 'shell'
     $iconChoicesShell = Join-Path $IconChoicesRoot 'shell'
     $plan = New-Object System.Collections.Generic.List[object]
 
     $plan.Add((New-PfiRegistryValue $RegistryRoot 'MUIVerb' 'Folder Icons'))
-    $plan.Add((New-PfiRegistryValue $RegistryRoot 'MultiSelectModel' 'Single'))
+    if ($SelectionBrokerHash -cnotmatch '^[a-f0-9]{64}$') {
+        throw 'The selection broker identity must be a lowercase SHA-256 hash.'
+    }
+    $plan.Add((New-PfiRegistryValue $RegistryRoot 'MultiSelectModel' 'Player'))
     $plan.Add((New-PfiRegistryValue $RegistryRoot 'Icon' 'shell32.dll,3'))
     $plan.Add((New-PfiRegistryValue $RegistryRoot 'ExtendedSubCommandsKey' $SubcommandsReference))
 
@@ -185,35 +196,43 @@ function Get-PfiRegistryPlan {
             throw 'Manifest contains an invalid accepted menu entry.'
         }
         $ordinal++
-        $verbName = 'Icon_{0:D4}_{1}' -f $ordinal, ([string]$entry.hash).ToLowerInvariant()
+        $verbName = 'PortableFolderIcons.Apply.{0:D4}' -f $ordinal
         $verbPath = Join-Path $iconChoicesShell $verbName
         $cachedIcon = Join-Path (Join-Path $InstallRoot 'icons') ([string]$entry.cachedFilename)
-        $command = New-PfiActionCommand $PowerShellPath $runtimeScript Apply ([string]$entry.hash) `
-            -IncludeTarget -DeveloperMode $DeveloperMode -HiddenLauncherPath $hiddenLauncher
         $plan.Add((New-PfiRegistryValue $verbPath 'MUIVerb' ([string]$entry.menuLabel)))
         $plan.Add((New-PfiRegistryValue $verbPath 'Icon' ($cachedIcon + ',0')))
-        $plan.Add((New-PfiRegistryValue (Join-Path $verbPath 'command') '' $command))
+        $plan.Add((New-PfiRegistryValue $verbPath 'MultiSelectModel' 'Player'))
+        $plan.Add((New-PfiRegistryValue $verbPath 'PfiAction' 'Apply'))
+        $plan.Add((New-PfiRegistryValue $verbPath 'PfiIconHash' ([string]$entry.hash).ToLowerInvariant()))
+        $plan.Add((New-PfiRegistryValue (Join-Path $verbPath 'command') 'DelegateExecute' $script:PfiSelectionBrokerClsid))
     }
 
-    $resetPath = Join-Path $subcommandsShell 'Utility_0100_Reset'
+    $resetPath = Join-Path $subcommandsShell $script:PfiResetVerbName
     $plan.Add((New-PfiRegistryValue $resetPath 'MUIVerb' 'Reset to Default'))
     $plan.Add((New-PfiRegistryValue $resetPath 'CommandFlags' 32 'DWord'))
-    $plan.Add((New-PfiRegistryValue (Join-Path $resetPath 'command') '' (
-        New-PfiActionCommand $PowerShellPath $runtimeScript Reset -IncludeTarget `
-            -DeveloperMode $DeveloperMode -HiddenLauncherPath $hiddenLauncher
-    )))
+    $plan.Add((New-PfiRegistryValue $resetPath 'MultiSelectModel' 'Player'))
+    $plan.Add((New-PfiRegistryValue $resetPath 'PfiAction' 'Reset'))
+    $plan.Add((New-PfiRegistryValue (Join-Path $resetPath 'command') 'DelegateExecute' $script:PfiSelectionBrokerClsid))
 
     $repairPath = Join-Path $subcommandsShell 'Utility_0200_Repair'
     $plan.Add((New-PfiRegistryValue $repairPath 'MUIVerb' 'Repair Portable Folder Icons'))
+    $plan.Add((New-PfiRegistryValue $repairPath 'MultiSelectModel' 'Player'))
     $plan.Add((New-PfiRegistryValue (Join-Path $repairPath 'command') '' (
         New-PfiActionCommand $PowerShellPath $runtimeScript Repair
     )))
 
     $uninstallPath = Join-Path $subcommandsShell 'Utility_0300_Uninstall'
     $plan.Add((New-PfiRegistryValue $uninstallPath 'MUIVerb' 'Uninstall Portable Folder Icons'))
+    $plan.Add((New-PfiRegistryValue $uninstallPath 'MultiSelectModel' 'Player'))
     $plan.Add((New-PfiRegistryValue (Join-Path $uninstallPath 'command') '' (
         New-PfiActionCommand $PowerShellPath $runtimeScript Uninstall
     )))
+    $plan.Add((New-PfiRegistryValue $SelectionBrokerClsidRoot '' 'Portable Folder Icons Selection Broker'))
+    $plan.Add((New-PfiRegistryValue $SelectionBrokerClsidRoot 'PfiOwner' $script:PfiSelectionBrokerOwner))
+    $plan.Add((New-PfiRegistryValue $SelectionBrokerClsidRoot 'PfiBrokerSha256' $SelectionBrokerHash))
+    $localServer = Join-Path $SelectionBrokerClsidRoot 'LocalServer32'
+    $plan.Add((New-PfiRegistryValue $localServer '' (ConvertTo-PfiQuotedCommandArgument $selectionBroker)))
+    $plan.Add((New-PfiRegistryValue $localServer 'ServerExecutable' $selectionBroker))
     return $plan.ToArray()
 }
 
@@ -222,6 +241,7 @@ function Test-PfiApprovedRegistryRoots {
         [string]$RegistryRoot,
         [string]$SubcommandsRoot,
         [string]$IconChoicesRoot,
+        [string]$SelectionBrokerClsidRoot,
         [string]$DirectoryShellRoot
     )
 
@@ -229,6 +249,7 @@ function Test-PfiApprovedRegistryRoots {
         $RegistryRoot.Equals($script:PfiProductionRegistryRoot, [StringComparison]::OrdinalIgnoreCase) -and
         $SubcommandsRoot.Equals($script:PfiProductionSubcommandsRoot, [StringComparison]::OrdinalIgnoreCase) -and
         $IconChoicesRoot.Equals($script:PfiProductionIconChoicesRoot, [StringComparison]::OrdinalIgnoreCase) -and
+        $SelectionBrokerClsidRoot.Equals($script:PfiProductionSelectionBrokerClsidRoot, [StringComparison]::OrdinalIgnoreCase) -and
         $DirectoryShellRoot.Equals($script:PfiProductionDirectoryShellRoot, [StringComparison]::OrdinalIgnoreCase)
     )
     $testPrefix = 'HKCU:\Software\PortableFolderIcons\Tests\'
@@ -237,9 +258,33 @@ function Test-PfiApprovedRegistryRoots {
         $RegistryRoot.StartsWith($testPrefix, [StringComparison]::OrdinalIgnoreCase) -and
         $SubcommandsRoot.StartsWith($testClassesPrefix, [StringComparison]::OrdinalIgnoreCase) -and
         $IconChoicesRoot.StartsWith($testClassesPrefix, [StringComparison]::OrdinalIgnoreCase) -and
+        $SelectionBrokerClsidRoot -match '(?i)^HKCU:\\Software\\Classes\\CLSID\\\{[0-9a-f-]{36}\}$' -and
         $DirectoryShellRoot.StartsWith($testPrefix, [StringComparison]::OrdinalIgnoreCase)
     )
     return ($production -or $test)
+}
+
+function Test-PfiSelectionBrokerRegistryOwnership {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$SelectionBrokerClsidRoot,
+        [Parameter(Mandatory = $true)][string]$InstallRoot
+    )
+
+    if (-not (Test-Path -LiteralPath $SelectionBrokerClsidRoot)) { return $true }
+    $localServer = Join-Path $SelectionBrokerClsidRoot 'LocalServer32'
+    if (-not (Test-Path -LiteralPath $localServer)) { return $false }
+    $expectedBroker = Join-Path (Join-Path (Join-Path $InstallRoot 'runtime') 'SelectionHandler') `
+        'PortableFolderIcons.SelectionBroker.exe'
+    $rootKey = Get-Item -LiteralPath $SelectionBrokerClsidRoot
+    $localKey = Get-Item -LiteralPath $localServer
+    return (
+        [string]$rootKey.GetValue('') -ceq 'Portable Folder Icons Selection Broker' -and
+        [string]$rootKey.GetValue('PfiOwner') -ceq $script:PfiSelectionBrokerOwner -and
+        [string]$rootKey.GetValue('PfiBrokerSha256') -cmatch '^[a-f0-9]{64}$' -and
+        [string]$localKey.GetValue('') -ceq (ConvertTo-PfiQuotedCommandArgument $expectedBroker) -and
+        [string]$localKey.GetValue('ServerExecutable') -ceq $expectedBroker
+    )
 }
 
 function Get-PfiRecognizedLegacyContextMenuPaths {
@@ -290,23 +335,37 @@ function Register-PfiContextMenu {
         [string]$SubcommandsReference = $script:PfiProductionSubcommandsReference,
         [string]$IconChoicesRoot = $script:PfiProductionIconChoicesRoot,
         [string]$IconChoicesReference = $script:PfiProductionIconChoicesReference,
+        [string]$SelectionBrokerClsidRoot = $script:PfiProductionSelectionBrokerClsidRoot,
         [string]$DirectoryShellRoot = $script:PfiProductionDirectoryShellRoot,
         [bool]$DeveloperMode = $false
     )
 
-    if (-not (Test-PfiApprovedRegistryRoots $RegistryRoot $SubcommandsRoot $IconChoicesRoot $DirectoryShellRoot)) {
+    if (-not (Test-PfiApprovedRegistryRoots $RegistryRoot $SubcommandsRoot $IconChoicesRoot `
+        $SelectionBrokerClsidRoot $DirectoryShellRoot)) {
         throw 'Refusing to replace registry keys outside approved tool-owned roots.'
     }
+    if (-not (Test-PfiSelectionBrokerRegistryOwnership $SelectionBrokerClsidRoot $InstallRoot)) {
+        throw 'Refusing to replace a COM registration that is not exactly owned by Portable Folder Icons.'
+    }
+    $selectionRoot = Join-Path (Join-Path $InstallRoot 'runtime') 'SelectionHandler'
+    $buildManifest = Read-PfiSelectionBrokerBuildManifest `
+        (Join-Path $selectionRoot 'SelectionBroker.build.json')
+    $brokerInfo = Test-PfiSelectionBrokerArtifact `
+        (Join-Path $selectionRoot 'PortableFolderIcons.SelectionBroker.exe') $buildManifest
     $plan = @(Get-PfiRegistryPlan -Manifest $Manifest -InstallRoot $InstallRoot `
         -RegistryRoot $RegistryRoot -SubcommandsRoot $SubcommandsRoot `
         -SubcommandsReference $SubcommandsReference -IconChoicesRoot $IconChoicesRoot `
-        -IconChoicesReference $IconChoicesReference -DeveloperMode $DeveloperMode)
+        -IconChoicesReference $IconChoicesReference `
+        -SelectionBrokerClsidRoot $SelectionBrokerClsidRoot `
+        -SelectionBrokerHash $brokerInfo.Sha256 -DeveloperMode $DeveloperMode)
     if (-not $PSCmdlet.ShouldProcess($RegistryRoot, 'Replace Portable Folder Icons context menu')) {
         return $plan
     }
     [void](Assert-PfiRegistryPath -RegistryPath $RegistryRoot -OwnedRoot $RegistryRoot -AllowRoot)
     [void](Assert-PfiRegistryPath -RegistryPath $SubcommandsRoot -OwnedRoot $SubcommandsRoot -AllowRoot)
     [void](Assert-PfiRegistryPath -RegistryPath $IconChoicesRoot -OwnedRoot $IconChoicesRoot -AllowRoot)
+    [void](Assert-PfiRegistryPath -RegistryPath $SelectionBrokerClsidRoot `
+        -OwnedRoot $SelectionBrokerClsidRoot -AllowRoot)
     if (Test-Path -LiteralPath $RegistryRoot) {
         Remove-Item -LiteralPath $RegistryRoot -Recurse -Force
     }
@@ -315,6 +374,9 @@ function Register-PfiContextMenu {
     }
     if (Test-Path -LiteralPath $IconChoicesRoot) {
         Remove-Item -LiteralPath $IconChoicesRoot -Recurse -Force
+    }
+    if (Test-Path -LiteralPath $SelectionBrokerClsidRoot) {
+        Remove-Item -LiteralPath $SelectionBrokerClsidRoot -Recurse -Force
     }
     foreach ($item in $plan) {
         if (-not (Test-Path -LiteralPath $item.Path)) {
@@ -336,16 +398,22 @@ function Register-PfiContextMenu {
 function Remove-PfiContextMenu {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
+        [Parameter(Mandatory = $true)][string]$InstallRoot,
         [string]$RegistryRoot = $script:PfiProductionRegistryRoot,
         [string]$SubcommandsRoot = $script:PfiProductionSubcommandsRoot,
         [string]$IconChoicesRoot = $script:PfiProductionIconChoicesRoot,
+        [string]$SelectionBrokerClsidRoot = $script:PfiProductionSelectionBrokerClsidRoot,
         [string]$DirectoryShellRoot = $script:PfiProductionDirectoryShellRoot
     )
 
-    if (-not (Test-PfiApprovedRegistryRoots $RegistryRoot $SubcommandsRoot $IconChoicesRoot $DirectoryShellRoot)) {
+    if (-not (Test-PfiApprovedRegistryRoots $RegistryRoot $SubcommandsRoot $IconChoicesRoot `
+        $SelectionBrokerClsidRoot $DirectoryShellRoot)) {
         throw 'Refusing to remove registry keys outside approved tool-owned roots.'
     }
-    foreach ($ownedRoot in @($RegistryRoot, $SubcommandsRoot, $IconChoicesRoot)) {
+    if (-not (Test-PfiSelectionBrokerRegistryOwnership $SelectionBrokerClsidRoot $InstallRoot)) {
+        throw 'Refusing to remove a COM registration that is not exactly owned by Portable Folder Icons.'
+    }
+    foreach ($ownedRoot in @($RegistryRoot, $SubcommandsRoot, $IconChoicesRoot, $SelectionBrokerClsidRoot)) {
         if ($PSCmdlet.ShouldProcess($ownedRoot, 'Remove Portable Folder Icons context menu') -and
             (Test-Path -LiteralPath $ownedRoot)) {
             Remove-Item -LiteralPath $ownedRoot -Recurse -Force

@@ -1,0 +1,9 @@
+# Failures already present when the gate was established. A listed failure is labelled BASELINE in reports;
+# it still makes its check FAIL. Remove a row once the failure is fixed. Fields are TAB-separated.
+# id	exact [FAIL] text from scripts\verify.ps1	first_seen	classification and note
+#
+# Resolved (rows removed 2026-11-16, Phase 0 final reconciliation):
+#   B-001 "missing required file: LICENSE" and B-002 "forbidden root item(s): LICENSE.LICENSE". The working-tree
+#   rename was reversed: LICENSE.LICENSE was renamed back to LICENSE. Its normalized content is the committed blob
+#   HEAD:LICENSE (3e2e28b0), so Git shows no change. Last runs that carried them: 20261116T154150Z-355cda and
+#   20261116T162245Z-0970dc.

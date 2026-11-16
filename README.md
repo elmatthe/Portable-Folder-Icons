@@ -32,7 +32,7 @@ menu entries.
 ## Use
 
 Right-click one normal writable folder. On Windows 11, select **Show more
-options**, open **Folder Icons**, and choose a color.
+options**, open **Folder Icons → Choose Folder Icon**, and choose a color.
 
 ![Folder Icons classic context-menu submenu](files/readme-assets/folder-icons-submenu.png)
 
@@ -111,7 +111,11 @@ current-user registry entries and validates cached ICO content by SHA-256.
 
 ## Roadmap
 
-Multi-folder selection is planned for a future release.
+The v0.1.1 development branch contains the scalable nested icon chooser.
+Multi-folder selection has an uncommitted local implementation that passes
+automation and awaits manual Explorer acceptance. See
+[the development handoff](md-instructions/Handoff.md) for its current state
+and the remaining release gates. The released v0.1.0 menu supports one folder.
 
 ## License and icon rights
 

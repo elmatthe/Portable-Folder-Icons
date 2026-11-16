@@ -1,0 +1,18 @@
+{
+    "schemaVersion":  1,
+    "sourceFilename":  "PortableFolderIcons.SelectionBroker.cs",
+    "sourceSha256":  "4dc9ec37876146095d80aa71bc1b601a68e82682be79f85a19c03f85b76e4055",
+    "compiler":  "4.8.9221.0 built by: NET481REL1LAST_25H2",
+    "artifacts":  [
+                      {
+                          "platform":  "x64",
+                          "filename":  "PortableFolderIcons.SelectionBroker.x64.exe",
+                          "sha256":  "88a113f199931905d04daf682ded801ee64e7bebe899488c9b1d1ecfa8cf4659"
+                      },
+                      {
+                          "platform":  "x86",
+                          "filename":  "PortableFolderIcons.SelectionBroker.x86.exe",
+                          "sha256":  "134832fd71a9afeeb798327676f882633bd4a763f1c2b29ffa4b40357446bd72"
+                      }
+                  ]
+}

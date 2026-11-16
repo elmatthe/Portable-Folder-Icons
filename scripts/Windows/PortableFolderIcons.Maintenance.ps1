@@ -12,7 +12,8 @@ function Test-PfiInstalledRuntime {
         'PortableFolderIcons.Actions.ps1',
         'PortableFolderIcons.Core.ps1',
         'PortableFolderIcons.Integration.ps1',
-        'PortableFolderIcons.Maintenance.ps1'
+        'PortableFolderIcons.Maintenance.ps1',
+        'PortableFolderIcons.Selection.ps1'
     )
     $missing = New-Object System.Collections.Generic.List[string]
     foreach ($name in $requiredScripts) {
@@ -22,6 +23,11 @@ function Test-PfiInstalledRuntime {
     if ($missing.Count -gt 0) {
         throw ('Installed runtime is incomplete. Missing: {0}' -f ($missing -join ', '))
     }
+    $selectionRoot = Join-Path (Join-Path $InstallRoot 'runtime') 'SelectionHandler'
+    $selectionManifest = Read-PfiSelectionBrokerBuildManifest `
+        (Join-Path $selectionRoot 'SelectionBroker.build.json')
+    $selectionBroker = Test-PfiSelectionBrokerArtifact `
+        (Join-Path $selectionRoot 'PortableFolderIcons.SelectionBroker.exe') $selectionManifest
     $settings = Read-PfiInstalledSettings (Join-Path $InstallRoot 'settings.json')
     $manifest = Read-PfiManifest (Join-Path $InstallRoot 'manifest.json')
     $validated = 0
@@ -42,6 +48,7 @@ function Test-PfiInstalledRuntime {
         Manifest = $manifest
         Settings = $settings
         ValidatedIcons = $validated
+        SelectionBroker = $selectionBroker
     }
 }
 
@@ -75,6 +82,7 @@ function Invoke-PfiRepair {
         ImportedRepositoryIcons = $false
         GeneratedResources = $generatedResources
         DeveloperMode = [bool]$state.Settings.developerMode
+        SelectionBrokerPlatform = $state.SelectionBroker.Platform
     }
 }
 
@@ -94,7 +102,7 @@ function Remove-PfiInstalledFiles {
             throw 'Refusing cleanup outside the exact Portable-Folder-Icons install root.'
         }
     }
-    foreach ($relativePath in @('runtime', 'manifest.json', 'settings.json')) {
+    foreach ($relativePath in @('runtime', 'state', 'manifest.json', 'settings.json')) {
         $target = Join-Path $root $relativePath
         if (Test-Path -LiteralPath $target) {
             [void](Assert-PfiPathWithinRoot $target $root)
@@ -126,7 +134,7 @@ function Invoke-PfiUninstall {
 
     if (-not $Confirmed) { throw 'Uninstall requires explicit confirmation.' }
     if (-not $SkipRegistry) {
-        Remove-PfiContextMenu -Confirm:$false
+        Remove-PfiContextMenu -InstallRoot $InstallRoot -Confirm:$false
         $cleanupSource = Join-Path (Join-Path $InstallRoot 'runtime') 'Cleanup-PortableFolderIcons.ps1'
         if (-not (Test-Path -LiteralPath $cleanupSource -PathType Leaf)) {
             throw 'The uninstall cleanup helper is missing. Rerun Repair or repository setup.'

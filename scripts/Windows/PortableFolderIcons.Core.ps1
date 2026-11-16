@@ -1,6 +1,7 @@
 Set-StrictMode -Version 2.0
 
 $script:PfiSettingsSchema = 1
+$script:PfiSelectionBrokerClsid = '{10DE6C30-6CD5-4B62-BCFA-18DD3687C531}'
 
 function Read-PfiDeveloperModeConfig {
     [CmdletBinding()]
@@ -116,6 +117,94 @@ function Get-PfiSha256 {
     finally {
         if ($null -ne $sha) { $sha.Dispose() }
         if ($null -ne $stream) { $stream.Dispose() }
+    }
+}
+
+function Read-PfiSelectionBrokerBuildManifest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [string]$SourcePath
+    )
+
+    try { $manifest = Get-Content -LiteralPath $LiteralPath -Raw -ErrorAction Stop | ConvertFrom-Json }
+    catch { throw 'The selection broker build manifest is missing or malformed.' }
+    $names = @($manifest.PSObject.Properties | Select-Object -ExpandProperty Name | Sort-Object)
+    if (($names -join ',') -cne 'artifacts,compiler,schemaVersion,sourceFilename,sourceSha256' -or
+        $manifest.schemaVersion -ne 1 -or
+        [string]$manifest.sourceFilename -cne 'PortableFolderIcons.SelectionBroker.cs' -or
+        [string]$manifest.sourceSha256 -cnotmatch '^[a-f0-9]{64}$' -or
+        [string]::IsNullOrWhiteSpace([string]$manifest.compiler)) {
+        throw 'The selection broker build manifest schema is invalid.'
+    }
+    $artifacts = @($manifest.artifacts)
+    if ($artifacts.Count -ne 2 -or
+        @($artifacts | Where-Object platform -ceq 'x64').Count -ne 1 -or
+        @($artifacts | Where-Object platform -ceq 'x86').Count -ne 1) {
+        throw 'The selection broker build manifest must identify one x64 and one x86 artifact.'
+    }
+    foreach ($artifact in $artifacts) {
+        $artifactNames = @($artifact.PSObject.Properties | Select-Object -ExpandProperty Name | Sort-Object)
+        if (($artifactNames -join ',') -cne 'filename,platform,sha256' -or
+            [string]$artifact.sha256 -cnotmatch '^[a-f0-9]{64}$' -or
+            [string]$artifact.filename -cne ('PortableFolderIcons.SelectionBroker.' + [string]$artifact.platform + '.exe')) {
+            throw 'The selection broker build manifest contains an invalid artifact entry.'
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($SourcePath)) {
+        if ((Get-PfiSha256 -LiteralPath $SourcePath) -cne [string]$manifest.sourceSha256) {
+            throw 'The selection broker source does not match its build manifest.'
+        }
+    }
+    return $manifest
+}
+
+function Test-PfiSelectionBrokerArtifact {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [Parameter(Mandatory = $true)]$BuildManifest,
+        [ValidateSet('x64', 'x86')][string]$Platform
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Platform)) {
+        $Platform = if ([Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' }
+    }
+    if (-not (Test-Path -LiteralPath $LiteralPath -PathType Leaf)) {
+        throw 'The required selection broker executable is missing.'
+    }
+    $expected = @($BuildManifest.artifacts | Where-Object platform -ceq $Platform)
+    if ($expected.Count -ne 1 -or
+        (Get-PfiSha256 -LiteralPath $LiteralPath) -cne [string]$expected[0].sha256) {
+        throw "The $Platform selection broker failed its SHA-256 identity check."
+    }
+    $bytes = [IO.File]::ReadAllBytes($LiteralPath)
+    if ($bytes.Length -lt 512 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
+        throw 'The selection broker is not a valid Windows PE executable.'
+    }
+    $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+    if ($peOffset -lt 0 -or ($peOffset + 6) -ge $bytes.Length -or
+        $bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset + 1] -ne 0x45 -or
+        $bytes[$peOffset + 2] -ne 0 -or $bytes[$peOffset + 3] -ne 0) {
+        throw 'The selection broker PE header is invalid.'
+    }
+    $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+    $expectedMachine = if ($Platform -eq 'x64') { [uint16]0x8664 } else { [uint16]0x014C }
+    if ($machine -ne $expectedMachine) {
+        throw "The selection broker machine type does not match $Platform."
+    }
+    try { $assemblyName = [Reflection.AssemblyName]::GetAssemblyName($LiteralPath) }
+    catch { throw 'The selection broker is not a valid managed .NET Framework assembly.' }
+    if ($assemblyName.Name -cne 'PortableFolderIcons.SelectionBroker.' + $Platform -or
+        $assemblyName.Version.ToString() -cne '0.1.1.0') {
+        throw 'The selection broker assembly identity or version is invalid.'
+    }
+    return [pscustomobject][ordered]@{
+        Platform = $Platform
+        Machine = ('0x{0:X4}' -f $machine)
+        Sha256 = [string]$expected[0].sha256
+        AssemblyName = $assemblyName.Name
+        AssemblyVersion = $assemblyName.Version.ToString()
     }
 }
 

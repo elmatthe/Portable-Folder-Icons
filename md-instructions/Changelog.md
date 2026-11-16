@@ -2,6 +2,39 @@
 
 ## v0.1.1 — Unreleased
 
+### Phase 2 automated checkpoint — 2026-10-01
+
+- Aligned broker initialization with the existing registered Reset key
+  `Utility_0100_Reset`; request/dispatcher action remains `Reset`. Registration,
+  request transport, and functional outcomes remain identical in both modes.
+- Added registration-derived Apply/Reset initialization and invalid-identity
+  coverage. Fixed native `IPropertyBag` VARIANT sizing (24 bytes x64, 16 x86),
+  rebuilt both brokers, and refreshed source/artifact hashes.
+- Classified `.ai/` and root `REPO-STRUCTURE.md` as ignored developer artifacts.
+  Verification permits these exact local items, requires them to stay untracked,
+  validates both broker artifacts, and includes C# in its security text scan.
+- Focused x64/x86 harnesses each pass 350 assertions; the authoritative gate
+  passes 371 PowerShell and 350 C# assertions with all 19 ICOs valid.
+- Installed x64 COM Apply, Reset, and repeat Reset pass on two repository-owned
+  fixtures; requests are consumed, broker processes exit, registered icon hashes
+  match, and unrelated INI fields survive. Manual Explorer acceptance remains;
+  no commit, release operation, Phase 3 work, or new-asset publication occurred.
+
+### Development state — 2026-10-01
+
+- Re-orientation confirms `88007c5` adds only the Phase 2 transport research
+  gate to Handoff; Phase 1 is committed in `d6b27b9`.
+- Preserved uncommitted Phase 2 work includes the x64/x86 .NET Framework COM
+  selection broker, GUID/JSON request transport, ordered sequential Apply/Reset
+  with aggregate outcomes, broker validation/staging, and COM lifecycle cleanup.
+  These changes are not yet a completed or published checkpoint.
+- Restored the locally deleted tracked `.command` Windows-only notice from
+  HEAD. Preserved all 19 intentional ICOs; no new assets were committed.
+- Exact HEAD verification passes 292 assertions. Worktree tests pass 371
+  PowerShell and 256 separate C# harness assertions, with all 19 ICOs valid;
+  the overall gate fails only the existing workspace root allowlist. A Reset
+  verb identity mismatch remains outside the current synthetic test coverage.
+
 ### Added
 
 - Added a scalable **Choose Folder Icon** child cascade so the dynamic icon

@@ -13,6 +13,9 @@
 *.bat text eol=crlf
 *.command text eol=lf
 *.py text eol=lf
+# C# sources stay LF everywhere: setup verifies the broker source's SHA-256 against SelectionBroker.build.json,
+# which records the LF bytes, so a CRLF checkout (core.autocrlf=true) would make setup reject the broker.
+*.cs text eol=lf
 
 # --- Binaries (never normalize, never diff as text) ---------------------------
 *.png binary

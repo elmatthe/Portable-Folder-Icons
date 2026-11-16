@@ -64,12 +64,16 @@ $manifestPath = Join-Path $InstallRoot 'manifest.json'
 $settingsPath = Join-Path $InstallRoot 'settings.json'
 $stageRoot = Join-Path $InstallRoot ('.stage-' + [guid]::NewGuid().ToString('N'))
 $stageRuntime = Join-Path $stageRoot 'runtime'
+$stageSelectionHandler = Join-Path $stageRuntime 'SelectionHandler'
 $oldRuntime = Join-Path $InstallRoot ('.runtime-old-' + [guid]::NewGuid().ToString('N'))
 $oldManifest = Join-Path $InstallRoot ('.manifest-old-' + [guid]::NewGuid().ToString('N') + '.json')
 $oldSettings = Join-Path $InstallRoot ('.settings-old-' + [guid]::NewGuid().ToString('N') + '.json')
 $runtimeMoved = $false
 $manifestMoved = $false
 $settingsMoved = $false
+$runtimeActivated = $false
+$manifestActivated = $false
+$settingsActivated = $false
 $previousManifest = $null
 $previousSettings = $null
 
@@ -95,7 +99,8 @@ try {
         'PortableFolderIcons.Actions.ps1',
         'PortableFolderIcons.Core.ps1',
         'PortableFolderIcons.Integration.ps1',
-        'PortableFolderIcons.Maintenance.ps1'
+        'PortableFolderIcons.Maintenance.ps1',
+        'PortableFolderIcons.Selection.ps1'
     )
     foreach ($requiredName in $requiredRuntime) {
         if (-not (Test-Path -LiteralPath (Join-Path $sourceScripts $requiredName) -PathType Leaf)) {
@@ -119,6 +124,26 @@ try {
             throw "Staged runtime script failed parsing: $($scriptFile.Name)"
         }
     }
+    $selectionSource = Join-Path $sourceScripts 'SelectionHandler'
+    $selectionSourceCode = Join-Path $selectionSource 'PortableFolderIcons.SelectionBroker.cs'
+    $selectionBuildManifestPath = Join-Path $selectionSource 'SelectionBroker.build.json'
+    $selectionBuildManifest = Read-PfiSelectionBrokerBuildManifest `
+        $selectionBuildManifestPath $selectionSourceCode
+    $selectionPlatform = if ([Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' }
+    $selectionArtifact = Join-Path $selectionSource `
+        ('PortableFolderIcons.SelectionBroker.' + $selectionPlatform + '.exe')
+    [void](Test-PfiSelectionBrokerArtifact $selectionArtifact $selectionBuildManifest $selectionPlatform)
+    [void](New-Item -ItemType Directory -Path $stageSelectionHandler -Force)
+    Copy-Item -LiteralPath $selectionArtifact -Destination (
+        Join-Path $stageSelectionHandler 'PortableFolderIcons.SelectionBroker.exe'
+    )
+    Copy-Item -LiteralPath $selectionBuildManifestPath -Destination (
+        Join-Path $stageSelectionHandler 'SelectionBroker.build.json'
+    )
+    [void](Test-PfiSelectionBrokerArtifact `
+        (Join-Path $stageSelectionHandler 'PortableFolderIcons.SelectionBroker.exe') `
+        (Read-PfiSelectionBrokerBuildManifest (Join-Path $stageSelectionHandler 'SelectionBroker.build.json')) `
+        $selectionPlatform)
 
     $inventory = @(Get-PfiIconInventory -SourceDirectory $sourceIcons -CacheDirectory $iconsPath)
     $cacheConflicts = @($inventory | Where-Object CacheAction -eq 'RejectCacheConflict')
@@ -161,8 +186,11 @@ try {
         $settingsMoved = $true
     }
     Move-Item -LiteralPath $stageRuntime -Destination $runtimePath
+    $runtimeActivated = $true
     Move-Item -LiteralPath $stagedManifest -Destination $manifestPath
+    $manifestActivated = $true
     Move-Item -LiteralPath $stagedSettings -Destination $settingsPath
+    $settingsActivated = $true
 
     if (-not $SkipRegistry) {
         [void](Register-PfiContextMenu -Manifest (Read-PfiManifest $manifestPath) -InstallRoot $InstallRoot -DeveloperMode $developerMode)
@@ -193,18 +221,29 @@ try {
         Icons = $iconsPath
         Manifest = $manifestPath
         Settings = ('{0} (developer_mode={1})' -f $settingsPath, $developerMode.ToString().ToLowerInvariant())
+        SelectionBroker = ('{0} ({1})' -f (
+            Join-Path $stageSelectionHandler 'PortableFolderIcons.SelectionBroker.exe'
+        ).Replace($stageRoot, $InstallRoot), $selectionPlatform)
         Registry = if ($SkipRegistry) { 'Skipped by request' } else { $script:PfiProductionRegistryRoot }
     } | Format-List | Out-Host
     exit 0
 }
 catch {
     [Console]::Error.WriteLine(('ERROR: {0}' -f $_.Exception.Message))
+    if (-not $SkipRegistry -and $null -eq $previousManifest) {
+        try { Remove-PfiContextMenu -InstallRoot $InstallRoot -Confirm:$false }
+        catch { [Console]::Error.WriteLine('WARNING: Partial context-menu/COM state could not be removed automatically.') }
+    }
     if ($runtimeMoved -and (Test-Path -LiteralPath $oldRuntime -PathType Container)) {
         if (Test-Path -LiteralPath $runtimePath -PathType Container) {
             [void](Assert-PfiPathWithinRoot -CandidatePath $runtimePath -AllowedRoot $InstallRoot)
             Remove-Item -LiteralPath $runtimePath -Recurse -Force
         }
         Move-Item -LiteralPath $oldRuntime -Destination $runtimePath
+    }
+    elseif ($runtimeActivated -and (Test-Path -LiteralPath $runtimePath -PathType Container)) {
+        [void](Assert-PfiPathWithinRoot -CandidatePath $runtimePath -AllowedRoot $InstallRoot)
+        Remove-Item -LiteralPath $runtimePath -Recurse -Force
     }
     if ($manifestMoved -and (Test-Path -LiteralPath $oldManifest -PathType Leaf)) {
         if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
@@ -213,12 +252,20 @@ catch {
         }
         Move-Item -LiteralPath $oldManifest -Destination $manifestPath
     }
+    elseif ($manifestActivated -and (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        [void](Assert-PfiPathWithinRoot -CandidatePath $manifestPath -AllowedRoot $InstallRoot)
+        Remove-Item -LiteralPath $manifestPath -Force
+    }
     if ($settingsMoved -and (Test-Path -LiteralPath $oldSettings -PathType Leaf)) {
         if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
             [void](Assert-PfiPathWithinRoot -CandidatePath $settingsPath -AllowedRoot $InstallRoot)
             Remove-Item -LiteralPath $settingsPath -Force
         }
         Move-Item -LiteralPath $oldSettings -Destination $settingsPath
+    }
+    elseif ($settingsActivated -and (Test-Path -LiteralPath $settingsPath -PathType Leaf)) {
+        [void](Assert-PfiPathWithinRoot -CandidatePath $settingsPath -AllowedRoot $InstallRoot)
+        Remove-Item -LiteralPath $settingsPath -Force
     }
     if (-not $SkipRegistry -and $null -ne $previousManifest) {
         try {

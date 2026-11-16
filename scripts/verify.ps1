@@ -1,9 +1,23 @@
 [CmdletBinding()]
-param()
+param(
+    # Passed through to the test suite. The compiled C# harness is launched only with explicit
+    # authorization (-AllowNativeHarness, or PFI_GATE_NATIVE_HARNESS=allow); by default it is built
+    # or reused but withheld. A withheld or denied launch makes the result BLOCKED, never PASS.
+    [switch]$AllowNativeHarness,
+    # Withhold the launch even when authorized.
+    [switch]$SkipNativeHarness
+)
 
 $ErrorActionPreference = 'Stop'
 $script:Failures = New-Object System.Collections.Generic.List[string]
+$script:Blocked = New-Object System.Collections.Generic.List[string]
 $repoRoot = Split-Path -Parent $PSScriptRoot
+
+function Add-CheckBlocked {
+    param([Parameter(Mandatory = $true)][string]$Message)
+    $script:Blocked.Add($Message)
+    Write-Host ("  [BLOCKED] {0}" -f $Message) -ForegroundColor Yellow
+}
 
 function Add-CheckFailure {
     param([Parameter(Mandatory = $true)][string]$Message)
@@ -21,10 +35,15 @@ Write-Host ('Repository: {0}' -f $repoRoot)
 
 $testScript = Join-Path $repoRoot 'files\tests\Invoke-Tests.ps1'
 if (Test-Path -LiteralPath $testScript -PathType Leaf) {
-    & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
-        -NoLogo -NoProfile -ExecutionPolicy Bypass -File $testScript
+    $testArguments = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $testScript)
+    if ($AllowNativeHarness) { $testArguments += '-AllowNativeHarness' }
+    if ($SkipNativeHarness) { $testArguments += '-SkipNativeHarness' }
+    & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') @testArguments
     if ($LASTEXITCODE -eq 0) {
         Add-CheckPass 'deterministic PowerShell tests'
+    }
+    elseif ($LASTEXITCODE -eq 3) {
+        Add-CheckBlocked 'test suite: no assertion failed, but the compiled C# harness was not executed (BLOCKED_BY_ENDPOINT_SECURITY; see suite output)'
     }
     else {
         Add-CheckFailure ("test suite exited with code {0}" -f $LASTEXITCODE)
@@ -49,6 +68,7 @@ $required = @(
     'md-instructions\Changelog.md',
     'md-instructions\Decisions.md',
     'md-instructions\Handoff.md',
+    'AGENTS.md',
     'scripts\verify.ps1'
     'scripts\Windows\Cleanup-PortableFolderIcons.ps1'
     'scripts\Windows\Install-PortableFolderIcons.ps1'
@@ -58,6 +78,15 @@ $required = @(
     'scripts\Windows\PortableFolderIcons.Core.ps1'
     'scripts\Windows\PortableFolderIcons.Integration.ps1'
     'scripts\Windows\PortableFolderIcons.Maintenance.ps1'
+    'scripts\Windows\PortableFolderIcons.Selection.ps1'
+    'scripts\Windows\SelectionHandler\Build-SelectionBroker.ps1'
+    'scripts\Windows\SelectionHandler\PortableFolderIcons.SelectionBroker.cs'
+    'scripts\Windows\SelectionHandler\PortableFolderIcons.SelectionBroker.x64.exe'
+    'scripts\Windows\SelectionHandler\PortableFolderIcons.SelectionBroker.x86.exe'
+    'scripts\Windows\SelectionHandler\SelectionBroker.build.json'
+    'files\tests\SelectionBrokerHarness.cs'
+    'files\tests\Invoke-SelectionBrokerTests.ps1'
+    'files\tests\Invoke-InstalledSelectionBrokerTests.ps1'
 )
 foreach ($relativePath in $required) {
     if (Test-Path -LiteralPath (Join-Path $repoRoot $relativePath) -PathType Leaf) {
@@ -66,6 +95,31 @@ foreach ($relativePath in $required) {
     else {
         Add-CheckFailure ("missing required file: {0}" -f $relativePath)
     }
+}
+
+# Validate both distribution artifacts even when tests run in one architecture.
+try {
+    . (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Core.ps1')
+    $brokerSourceRoot = Join-Path $repoRoot 'scripts\Windows\SelectionHandler'
+    $brokerBuild = Read-PfiSelectionBrokerBuildManifest `
+        (Join-Path $brokerSourceRoot 'SelectionBroker.build.json') `
+        (Join-Path $brokerSourceRoot 'PortableFolderIcons.SelectionBroker.cs')
+    foreach ($brokerPlatform in @('x64', 'x86')) {
+        [void](Test-PfiSelectionBrokerArtifact `
+            (Join-Path $brokerSourceRoot ('PortableFolderIcons.SelectionBroker.' + $brokerPlatform + '.exe')) `
+            $brokerBuild $brokerPlatform)
+        Add-CheckPass ("selection broker source/build/PE/assembly identity: {0}" -f $brokerPlatform)
+    }
+}
+catch { Add-CheckFailure ("selection broker identity: {0}" -f $_.Exception.Message) }
+
+# Setup checks the broker source's SHA-256 against the build manifest, which records the LF bytes. Without a fixed
+# eol, a fresh clone with core.autocrlf=true checks the source out as CRLF and setup rejects the broker.
+$gitAttributes = Get-Command git.exe -ErrorAction SilentlyContinue
+if ($null -ne $gitAttributes) {
+    $eolAttribute = @(& $gitAttributes.Source -C $repoRoot check-attr eol -- 'scripts/Windows/SelectionHandler/PortableFolderIcons.SelectionBroker.cs')
+    if (($eolAttribute -join '') -match ':\s*eol:\s*lf\s*$') { Add-CheckPass 'broker source is checked out with LF line endings (eol=lf), matching its build manifest' }
+    else { Add-CheckFailure 'broker source needs eol=lf in .gitattributes so fresh checkouts match its build manifest' }
 }
 
 $powershellFiles = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'scripts') -Filter '*.ps1' -File -Recurse)
@@ -134,15 +188,18 @@ else {
 }
 
 $allowedRootNames = @(
-    '.agents', '.claude', '.codex', '.git', '.vscode',
+    '.agents', '.ai', '.claude', '.codex', '.git', '.vscode',
     'files', 'md-instructions', 'scripts',
-    '.gitattributes', '.gitignore', 'AI-WORKSPACE.md', 'LICENSE', 'README.md',
+    '.gitattributes', '.gitignore', 'AGENTS.md', 'AI-WORKSPACE.md', 'LICENSE', 'README.md',
     'config.toml', 'Map-Repo-Structure.bat',
     'Setup_and_Run-Portable-Folder-Icons.bat',
     'Setup_and_Run-Portable-Folder-Icons.command'
 )
+# Exact local developer artifacts, not additions to the shipped root contract.
+$developerRootFiles = @('REPO-STRUCTURE.md')
 $unexpectedRoot = @(Get-ChildItem -LiteralPath $repoRoot -Force | Where-Object {
-    $_.Name -notin $allowedRootNames
+    $_.Name -notin $allowedRootNames -and
+    -not (-not $_.PSIsContainer -and $_.Name -in $developerRootFiles)
 })
 if ($unexpectedRoot.Count -eq 0) {
     Add-CheckPass 'clean allowed root layout'
@@ -151,8 +208,30 @@ else {
     Add-CheckFailure ('forbidden root item(s): {0}' -f (($unexpectedRoot.Name | Sort-Object) -join ', '))
 }
 
+# Workspace guidance and the generated map must stay local and ignored.
+$gitLayout = Get-Command git.exe -ErrorAction SilentlyContinue
+if ($null -ne $gitLayout) {
+    $trackedDeveloperFiles = @(& $gitLayout.Source -C $repoRoot ls-files -- .ai REPO-STRUCTURE.md)
+    $unignoredDeveloperFiles = @()
+    foreach ($localItem in @('.ai', 'REPO-STRUCTURE.md')) {
+        if (Test-Path -LiteralPath (Join-Path $repoRoot $localItem)) {
+            & $gitLayout.Source -C $repoRoot check-ignore -q -- $localItem
+            if ($LASTEXITCODE -ne 0) { $unignoredDeveloperFiles += $localItem }
+        }
+    }
+    if ($trackedDeveloperFiles.Count -eq 0 -and $unignoredDeveloperFiles.Count -eq 0) {
+        Add-CheckPass 'workspace .ai and generated REPO-STRUCTURE.md are ignored and untracked'
+    }
+    else {
+        Add-CheckFailure 'developer workspace guidance/map must be ignored and excluded from tracked shipping files'
+    }
+}
+
 $shippedFiles = @(
     Get-ChildItem -LiteralPath (Join-Path $repoRoot 'scripts\Windows') -Filter '*.ps1' -File
+)
+$shippedFiles += Get-Item -LiteralPath (
+    Join-Path $repoRoot 'scripts\Windows\SelectionHandler\PortableFolderIcons.SelectionBroker.cs'
 )
 $shippedFiles += Get-Item -LiteralPath (
     Join-Path $repoRoot 'scripts\Windows\Invoke-PortableFolderIcons.Hidden.vbs'
@@ -186,6 +265,8 @@ foreach ($check in $forbiddenPatterns.GetEnumerator()) {
 
 $config = Get-Content -LiteralPath (Join-Path $repoRoot 'config.toml') -Raw
 if ($config -match 'version\s*=\s*"0\.1\.1"' -and
+    $config -match '(?m)^single_selection\s*=\s*false\s*$' -and
+    $config -match '(?m)^multi_selection\s*=\s*true\s*$' -and
     $config -match '(?ms)^\[settings\]\s*.*?^developer_mode\s*=\s*false\s*(?:#.*)?$' -and
     $config -match 'requires_python\s*=\s*false' -and
     $config -match 'windows\s*=\s*true' -and
@@ -204,6 +285,17 @@ if ($briefing -match 'v0\.1\.1' -and $readme -match 'SmartScreen' -and
 }
 else {
     Add-CheckFailure 'required v0.1.1 documentation is incomplete'
+}
+
+$agentsPath = Join-Path $repoRoot 'AGENTS.md'
+$agentsText = if (Test-Path -LiteralPath $agentsPath -PathType Leaf) { Get-Content -LiteralPath $agentsPath -Raw } else { '' }
+if ($agentsText -match '(?m)^### Repository development artifact housekeeping' -and
+    $agentsText -match 'files/dev-work/verification-gate/outputs/' -and $agentsText -match 'RETAIN\.md' -and
+    $agentsText -match 'Remove-GateOutputs\.ps1') {
+    Add-CheckPass 'AGENTS.md documents development-artifact housekeeping'
+}
+else {
+    Add-CheckFailure 'AGENTS.md must document development-artifact housekeeping (outputs retention, RETAIN.md, Remove-GateOutputs.ps1)'
 }
 
 $imageLinks = @([regex]::Matches($readme, '!\[[^\]]*\]\((files/readme-assets/[^)]+)\)') |
@@ -267,8 +359,13 @@ else {
 }
 
 if ($script:Failures.Count -gt 0) {
-    Write-Host ('RESULT: FAIL ({0} failure(s))' -f $script:Failures.Count) -ForegroundColor Red
+    Write-Host ('RESULT: FAIL ({0} failure(s), {1} blocked)' -f $script:Failures.Count, $script:Blocked.Count) -ForegroundColor Red
     exit 1
+}
+if ($script:Blocked.Count -gt 0) {
+    # A blocked check is never a pass: exit 2 matches the verification gate's BLOCKED code.
+    Write-Host ('RESULT: BLOCKED ({0} check(s) could not be executed)' -f $script:Blocked.Count) -ForegroundColor Yellow
+    exit 2
 }
 
 Write-Host 'RESULT: PASS' -ForegroundColor Green

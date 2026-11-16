@@ -1,0 +1,36 @@
+# Generic verification checks. Fields are separated by single TAB characters.
+# Lines starting with # are comments; lines starting with @ are settings.
+#
+# id	required(yes|no)	timeout_seconds	platforms(all|windows|macos)	layer(portable|native)	program	arg1	arg2 ...
+#
+# program and arguments are an argument array, never a shell string. Each check must
+# assert a real outcome: exit 0 only when the behaviour was proven. An unconfigured
+# project is BLOCKED, never PASS.
+#
+# PFI check exit codes: 0 PASS, 1 FAIL, 2 BLOCKED, 3 BLOCKED_BY_ENDPOINT_SECURITY, 4 NOT RUN (opt-in), 5 CRASH (FAIL).
+# Opt-ins (environment, set only deliberately): PFI_GATE_NATIVE_HARNESS=allow after an authorized security
+# review of the compiled C# harness; PFI_GATE_INSTALLED_COM=allow to exercise the live installation;
+# PFI_GATE_NATIVE_RECLASSIFIED=<sha256> only after the security owner reclassified that exact blocked build.
+@project	Portable-Folder-Icons
+@version	0.1.1
+@platforms	windows
+@delivery_scope	windows
+# c-0001 deterministic PowerShell suite, files\tests\Invoke-Tests.ps1 (C# harness launch withheld by default; owned by c-0002)
+c-0001	yes	1500	windows	native	powershell.exe	-NoLogo	-NoProfile	-ExecutionPolicy	Bypass	-File	files/dev-work/verification-gate/tests/Invoke-ProjectVerifyCheck.ps1	-Target	Suite
+# c-0002 compiled C# broker harness, x64 and x86: builds once per input set into cache/native-harness and reuses it;
+# launches only with PFI_GATE_NATIVE_HARNESS=allow (otherwise BLOCKED_BY_ENDPOINT_SECURITY, withheld)
+c-0002	yes	900	windows	native	powershell.exe	-NoLogo	-NoProfile	-ExecutionPolicy	Bypass	-File	files/dev-work/verification-gate/tests/Invoke-NativeHarnessCheck.ps1
+# c-0003 Phase 0 chooser/Reset/Repair/Uninstall diagnostics: disposable fixtures, isolated registry roots
+c-0003	yes	900	windows	native	powershell.exe	-NoLogo	-NoProfile	-ExecutionPolicy	Bypass	-File	files/dev-work/verification-gate/tests/Invoke-Phase0Diagnostics.ps1
+# c-0004 optional, opt-in: installed x64 COM dispatch smoke against the live installation
+c-0004	no	900	windows	native	powershell.exe	-NoLogo	-NoProfile	-ExecutionPolicy	Bypass	-File	files/dev-work/verification-gate/tests/Invoke-InstalledComCheck.ps1
+# c-0005 public distribution: exactly ten tracked colour ICOs, no personal ICO staged
+c-0005	yes	120	windows	portable	powershell.exe	-NoLogo	-NoProfile	-ExecutionPolicy	Bypass	-File	files/dev-work/verification-gate/tests/Test-PublicInventory.ps1
+# c-0006 scripts\verify.ps1: authoritative project verifier (suite again, required files, root layout, parse, ICOs, docs, security scan, diff --check)
+c-0006	yes	1500	windows	native	powershell.exe	-NoLogo	-NoProfile	-ExecutionPolicy	Bypass	-File	files/dev-work/verification-gate/tests/Invoke-ProjectVerifyCheck.ps1	-Target	Verifier
+# c-0007 native verification infrastructure: outcome classification, process capture, c-0002/c-0004 wrappers with stub
+# runners, harness build cache in a disposable root (compile only), blocked-binary launch guard. Launches no harness.
+c-0007	yes	600	windows	native	powershell.exe	-NoLogo	-NoProfile	-ExecutionPolicy	Bypass	-File	files/dev-work/verification-gate/tests/Test-NativeHarnessInfrastructure.ps1
+# c-0008 housekeeping helper safeguards (helpers/Remove-GateOutputs.ps1) on a disposable fake outputs tree; a dry run
+# against the real outputs folder must delete nothing.
+c-0008	yes	300	windows	native	powershell.exe	-NoLogo	-NoProfile	-ExecutionPolicy	Bypass	-File	files/dev-work/verification-gate/tests/Test-GateOutputHousekeeping.ps1

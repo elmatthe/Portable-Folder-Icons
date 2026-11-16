@@ -37,7 +37,8 @@ requires_python = false
 
 [features]
 classic_context_menu = true
-single_selection = true
+single_selection = false
+multi_selection = true
 stable_hashed_icon_cache = true
 explorer_restart = false
 telemetry = false

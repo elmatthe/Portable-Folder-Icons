@@ -1,16 +1,27 @@
 [CmdletBinding()]
-param()
+param(
+    # Explicitly authorize launching the compiled C# harness for this run (equivalent to
+    # PFI_GATE_NATIVE_HARNESS=allow). By default the harness is built or reused but NOT launched,
+    # because endpoint security blocks unclassified builds; the run then ends BLOCKED (exit 3), never PASS.
+    [switch]$AllowNativeHarness,
+    # Withhold the launch even when authorized (kept for existing callers).
+    [switch]$SkipNativeHarness
+)
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 . (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Core.ps1')
+. (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Selection.ps1')
 . (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Integration.ps1')
 . (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Actions.ps1')
 . (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Maintenance.ps1')
+. (Join-Path $PSScriptRoot 'NativeHarness.Common.ps1')
+$nativeLaunchAuthorized = Test-PfiNativeLaunchAuthorized -Allow:$AllowNativeHarness -Skip:$SkipNativeHarness
 Add-Type -AssemblyName System.Drawing
 
 $script:Passed = 0
 $script:Failed = 0
+$script:Blocked = New-Object System.Collections.Generic.List[string]
 
 function Assert-Equal {
     param($Expected, $Actual, [string]$Name)
@@ -109,12 +120,67 @@ function New-TestExplorerWindow {
     return $window
 }
 
+function Write-TestSelectionPayload {
+    param(
+        [string]$InstallRoot,
+        [string]$Action,
+        [string[]]$Paths,
+        [string]$IconHash,
+        [datetime]$CreatedUtc = [DateTime]::UtcNow,
+        [string]$Token = ([guid]::NewGuid().ToString('N'))
+    )
+
+    $payload = [ordered]@{
+        schemaVersion = 1
+        token = $Token
+        createdUtc = $CreatedUtc.ToUniversalTime().ToString('o')
+        action = $Action
+    }
+    if ($Action -ceq 'Apply') { $payload.iconHash = $IconHash }
+    $payload.paths = [string[]]$Paths
+    $bytes = (New-Object Text.UTF8Encoding($false)).GetBytes(
+        ($payload | ConvertTo-Json -Depth 5 -Compress)
+    )
+    $path = Get-PfiSelectionPayloadPath $InstallRoot $Token
+    [void](New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force)
+    [IO.File]::WriteAllBytes($path, $bytes)
+    return [pscustomobject]@{
+        Token = $Token
+        Hash = Get-PfiSha256Bytes $bytes
+        Path = $path
+    }
+}
+
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('PfiTests-' + [guid]::NewGuid().ToString('N'))
 [void](New-Item -ItemType Directory -Path $testRoot)
 $registryTestBase = $null
 $registryTestSubcommands = $null
 $registryTestIconChoices = $null
+$registryTestBrokerClsid = $null
 try {
+    $selectionSourceRoot = Join-Path $repoRoot 'scripts\Windows\SelectionHandler'
+    $selectionBuildManifest = Read-PfiSelectionBrokerBuildManifest `
+        (Join-Path $selectionSourceRoot 'SelectionBroker.build.json') `
+        (Join-Path $selectionSourceRoot 'PortableFolderIcons.SelectionBroker.cs')
+    $selectionPlatform = if ([Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' }
+    $selectionArtifact = Join-Path $selectionSourceRoot `
+        ('PortableFolderIcons.SelectionBroker.' + $selectionPlatform + '.exe')
+    $selectionArtifactInfo = Test-PfiSelectionBrokerArtifact `
+        $selectionArtifact $selectionBuildManifest $selectionPlatform
+    Assert-Equal $selectionPlatform $selectionArtifactInfo.Platform 'selection broker architecture matches this Windows installation'
+    Assert-Equal '0.1.1.0' $selectionArtifactInfo.AssemblyVersion 'selection broker assembly version is current'
+
+    $brokerHarnessDirectory = Join-Path $testRoot 'broker-harness'
+    [void](New-Item -ItemType Directory -Path $brokerHarnessDirectory)
+    # Built once per set of build inputs and reused from the ignored gate cache, so the binary keeps one identity
+    # (and one endpoint-security classification) while its inputs are unchanged. See NativeHarness.Common.ps1.
+    $brokerHarnessCacheRoot = Get-PfiNativeHarnessCacheRoot -RepoRoot $repoRoot
+    $brokerHarnessBuild = Get-PfiNativeHarnessBuild -Platform $selectionPlatform -BrokerAssembly $selectionArtifact `
+        -HarnessSource (Join-Path $repoRoot 'files\tests\SelectionBrokerHarness.cs') -CacheRoot $brokerHarnessCacheRoot
+    Write-Host ("  Harness build: {0} {1} cache={2} sha256={3} {4}" -f $selectionPlatform, $brokerHarnessBuild.Status,
+        $(if ($brokerHarnessBuild.CacheHit) { 'hit' } elseif ($brokerHarnessBuild.Compiled) { 'miss' } else { 'none' }),
+        $brokerHarnessBuild.Sha256, $brokerHarnessBuild.Executable)
+    Assert-Equal 'READY' $brokerHarnessBuild.Status 'selection broker handler-level harness compiles with inbox .NET Framework (or its verified cached build is reused)'
     $configPath = Join-Path $repoRoot 'config.toml'
     Assert-Equal $false (Read-PfiDeveloperModeConfig $configPath) 'Developer Mode defaults to false'
     foreach ($case in @(
@@ -250,6 +316,8 @@ try {
         -Destination (Join-Path $configurationRepo 'scripts\Windows')
     Copy-Item -Path (Join-Path $repoRoot 'scripts\Windows\*.vbs') `
         -Destination (Join-Path $configurationRepo 'scripts\Windows')
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'scripts\Windows\SelectionHandler') `
+        -Destination (Join-Path $configurationRepo 'scripts\Windows\SelectionHandler') -Recurse
     Copy-Item -Path (Join-Path $repoRoot 'files\ICO-Files\*.ico') `
         -Destination (Join-Path $configurationRepo 'files\ICO-Files')
     [IO.File]::WriteAllText(
@@ -278,10 +346,13 @@ try {
     $subcommandsRoot = 'HKCU:\Software\Classes\' + $subcommandsReference
     $iconChoicesReference = $subcommandsReference + '.IconChoices'
     $iconChoicesRoot = 'HKCU:\Software\Classes\' + $iconChoicesReference
+    $dryRunBrokerClsid = 'HKCU:\Software\Classes\CLSID\{' + [guid]::NewGuid().ToString().ToUpperInvariant() + '}'
+    $brokerHash = [string]$selectionArtifactInfo.Sha256
     $registryPlan = @(Get-PfiRegistryPlan -Manifest $installedManifest `
         -InstallRoot $commandInstallRoot -RegistryRoot $registryRoot `
         -SubcommandsRoot $subcommandsRoot -SubcommandsReference $subcommandsReference `
         -IconChoicesRoot $iconChoicesRoot -IconChoicesReference $iconChoicesReference `
+        -SelectionBrokerClsidRoot $dryRunBrokerClsid -SelectionBrokerHash $brokerHash `
         -PowerShellPath 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe')
     Assert-Equal $acceptedCount @($registryPlan | Where-Object {
         $_.Path.StartsWith((Join-Path $iconChoicesRoot 'shell'), [StringComparison]::OrdinalIgnoreCase) -and
@@ -293,7 +364,9 @@ try {
     } | Select-Object -ExpandProperty Value)
     $expectedLabels = @($acceptedEntries | Sort-Object menuLabel | Select-Object -ExpandProperty menuLabel)
     Assert-Equal ($expectedLabels -join ',') ($iconLabels -join ',') 'registry icon verbs are alphabetic'
-    Assert-Equal 'Single' ($registryPlan | Where-Object Name -eq 'MultiSelectModel').Value 'registry enforces single selection'
+    Assert-Equal 'Player' ($registryPlan | Where-Object {
+        $_.Path -eq $registryRoot -and $_.Name -eq 'MultiSelectModel'
+    }).Value 'registry enables COM Player multi-selection'
     Assert-Equal $subcommandsReference (
         $registryPlan | Where-Object { $_.Path -eq $registryRoot -and $_.Name -eq 'ExtendedSubCommandsKey' }
     ).Value 'parent references the separate submenu store'
@@ -311,11 +384,11 @@ try {
         $_.Path.StartsWith((Join-Path $registryRoot 'ExtendedSubCommandsKey'), [StringComparison]::OrdinalIgnoreCase)
     }).Count 'ExtendedSubCommandsKey is a value rather than a child key'
     Assert-Equal $acceptedCount @($registryPlan | Where-Object {
-        $_.Path.StartsWith((Join-Path $iconChoicesRoot 'shell\Icon_'), [StringComparison]::OrdinalIgnoreCase) -and
+        $_.Path.StartsWith((Join-Path $iconChoicesRoot 'shell\PortableFolderIcons.Apply.'), [StringComparison]::OrdinalIgnoreCase) -and
         $_.Name -eq 'MUIVerb'
     }).Count 'every accepted ICO has exactly one stored submenu action'
     Assert-Equal 0 @($registryPlan | Where-Object {
-        $_.Path.StartsWith((Join-Path $subcommandsRoot 'shell\Icon_'), [StringComparison]::OrdinalIgnoreCase)
+        $_.Path.StartsWith((Join-Path $subcommandsRoot 'shell\PortableFolderIcons.Apply.'), [StringComparison]::OrdinalIgnoreCase)
     }).Count 'utility parent contains no direct icon actions'
     foreach ($utilityLabel in @('Reset to Default', 'Repair Portable Folder Icons', 'Uninstall Portable Folder Icons')) {
         Assert-Equal 1 @($registryPlan | Where-Object {
@@ -323,36 +396,32 @@ try {
             $_.Path.StartsWith((Join-Path $subcommandsRoot 'shell'), [StringComparison]::OrdinalIgnoreCase)
         }).Count ("utility remains in short parent menu: {0}" -f $utilityLabel)
     }
-    $applyCommand = ($registryPlan | Where-Object {
-        $_.Name -eq '' -and $_.Value -match ' -Action Apply '
-    } | Select-Object -First 1).Value
-    Assert-True ($applyCommand.Contains('"' + $commandInstallRoot + '\runtime\Invoke-PortableFolderIcons.Hidden.vbs"')) `
-        'normal registry command quotes installed windowless launcher path'
-    Assert-True ($applyCommand -match '(?i)^"[A-Z]:\\Windows\\System32\\wscript\.exe" ') `
-        'normal Apply uses windowless Windows Script Host'
-    Assert-True ($applyCommand.EndsWith(' -TargetPath "%1"')) 'registry passes target as a fixed argument'
-    Assert-Equal $false ($applyCommand.Contains('powershell.exe')) 'normal Apply does not create a PowerShell console process directly'
-    $normalResetCommand = ($registryPlan | Where-Object {
-        $_.Name -eq '' -and $_.Value -match ' -Action Reset '
-    }).Value
-    Assert-True ($normalResetCommand.Contains('Invoke-PortableFolderIcons.Hidden.vbs')) `
-        'normal Reset uses the windowless launcher'
-    Assert-Equal $false ($normalResetCommand.Contains('powershell.exe')) `
-        'normal Reset does not create a PowerShell console process directly'
+    $delegateValues = @($registryPlan | Where-Object Name -eq 'DelegateExecute')
+    Assert-Equal ($acceptedCount + 1) $delegateValues.Count 'Apply and Reset each use one shared COM selection broker'
+    Assert-Equal 1 @($delegateValues | Select-Object -ExpandProperty Value -Unique).Count `
+        'all selection verbs use one deterministic CLSID'
+    Assert-Equal $script:PfiSelectionBrokerClsid $delegateValues[0].Value `
+        'selection verbs register the project-owned broker CLSID'
+    Assert-Equal $acceptedCount @($registryPlan | Where-Object {
+        $_.Name -eq 'PfiAction' -and $_.Value -eq 'Apply'
+    }).Count 'every Apply verb carries immutable action identity'
+    Assert-Equal $acceptedCount @($registryPlan | Where-Object {
+        $_.Name -eq 'PfiIconHash' -and $_.Value -cmatch '^[a-f0-9]{64}$'
+    }).Count 'every Apply verb carries a full manifest hash identity'
+    Assert-Equal 0 @($registryPlan | Where-Object {
+        $_.Path -match '(?i)PortableFolderIcons\.(Apply|Reset).*\\command$' -and
+        [string]$_.Value -match '(?i)(%1|TargetPath|\.ico(?:,0)?$)'
+    }).Count 'selection verbs pass neither paths nor arbitrary ICO locations on a command line'
     $developerPlan = @(Get-PfiRegistryPlan -Manifest $installedManifest `
         -InstallRoot $commandInstallRoot -RegistryRoot $registryRoot `
         -SubcommandsRoot $subcommandsRoot -SubcommandsReference $subcommandsReference `
         -IconChoicesRoot $iconChoicesRoot -IconChoicesReference $iconChoicesReference `
+        -SelectionBrokerClsidRoot $dryRunBrokerClsid -SelectionBrokerHash $brokerHash `
         -PowerShellPath 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' `
         -DeveloperMode $true)
-    $developerApply = ($developerPlan | Where-Object {
-        $_.Name -eq '' -and $_.Value -match ' -Action Apply '
-    } | Select-Object -First 1).Value
-    $developerReset = ($developerPlan | Where-Object {
-        $_.Name -eq '' -and $_.Value -match ' -Action Reset '
-    }).Value
-    Assert-Equal $false ($developerApply.Contains('-WindowStyle Hidden')) 'Developer Mode keeps Apply PowerShell window visible'
-    Assert-Equal $false ($developerReset.Contains('-WindowStyle Hidden')) 'Developer Mode keeps Reset PowerShell window visible'
+    Assert-Equal (($registryPlan | Where-Object Name -eq 'DelegateExecute').Value -join ',') `
+        (($developerPlan | Where-Object Name -eq 'DelegateExecute').Value -join ',') `
+        'Developer Mode does not change selection transport or action identity'
     foreach ($utility in @('Repair', 'Uninstall')) {
         $utilityCommand = ($developerPlan | Where-Object {
             $_.Name -eq '' -and $_.Value -match (' -Action ' + $utility + '(?: |$)')
@@ -364,27 +433,34 @@ try {
     $installedRegistryPlan = @(Get-PfiRegistryPlan -Manifest $installedManifest -InstallRoot $installRoot `
         -RegistryRoot $registryRoot -SubcommandsRoot $subcommandsRoot `
         -SubcommandsReference $subcommandsReference -IconChoicesRoot $iconChoicesRoot `
-        -IconChoicesReference $iconChoicesReference)
-    $installedCommands = @($installedRegistryPlan | Where-Object Name -eq '' | Select-Object -ExpandProperty Value)
-    Assert-Equal ($acceptedCount + 3) $installedCommands.Count 'icon and utility actions each have one command'
+        -IconChoicesReference $iconChoicesReference `
+        -SelectionBrokerClsidRoot $dryRunBrokerClsid -SelectionBrokerHash $brokerHash)
+    $installedCommands = @($installedRegistryPlan | Where-Object {
+        $_.Name -eq '' -and $_.Path -like '*\command'
+    } | Select-Object -ExpandProperty Value)
+    Assert-Equal 2 $installedCommands.Count 'only Repair and Uninstall retain static command lines'
     Assert-Equal 2 @($installedCommands | Where-Object {
         $_.Contains('"' + (Join-Path (Join-Path $installRoot 'runtime') 'Invoke-PortableFolderIcons.ps1') + '"')
     }).Count 'Repair and Uninstall point directly to the installed dispatcher'
-    Assert-Equal ($acceptedCount + 1) @($installedCommands | Where-Object {
-        $_.Contains('"' + (Join-Path (Join-Path $installRoot 'runtime') 'Invoke-PortableFolderIcons.Hidden.vbs') + '"')
-    }).Count 'normal Apply and Reset point to the installed windowless launcher'
+    Assert-Equal ($acceptedCount + 1) @($installedRegistryPlan | Where-Object Name -eq 'DelegateExecute').Count `
+        'Apply and Reset avoid legacy process-per-target command transport'
     Assert-True (Test-Path -LiteralPath (Join-Path (Join-Path $installRoot 'runtime') 'Invoke-PortableFolderIcons.ps1') -PathType Leaf) 'installed action dispatcher exists'
     Assert-True (Test-Path -LiteralPath (Join-Path (Join-Path $installRoot 'runtime') 'Invoke-PortableFolderIcons.Hidden.vbs') -PathType Leaf) `
         'installed windowless launcher exists'
+    Assert-True (Test-Path -LiteralPath (Join-Path (Join-Path (Join-Path $installRoot 'runtime') 'SelectionHandler') 'PortableFolderIcons.SelectionBroker.exe') -PathType Leaf) `
+        'installed selection broker exists independently of the repository'
     Assert-Throws {
         Register-PfiContextMenu -Manifest $installedManifest -InstallRoot $installRoot `
             -RegistryRoot 'HKCU:\Software\Classes\Directory\shell\ForeignTool' `
-            -IconChoicesRoot $iconChoicesRoot -IconChoicesReference $iconChoicesReference -WhatIf
+            -SubcommandsRoot $subcommandsRoot -SubcommandsReference $subcommandsReference `
+            -IconChoicesRoot $iconChoicesRoot -IconChoicesReference $iconChoicesReference `
+            -SelectionBrokerClsidRoot $dryRunBrokerClsid -WhatIf
     } 'registration rejects foreign HKCU subtree'
     $dryRun = @(Register-PfiContextMenu -Manifest $installedManifest -InstallRoot $installRoot `
         -RegistryRoot $registryRoot -SubcommandsRoot $subcommandsRoot `
         -SubcommandsReference $subcommandsReference -IconChoicesRoot $iconChoicesRoot `
-        -IconChoicesReference $iconChoicesReference -DirectoryShellRoot $registryRoot -WhatIf)
+        -IconChoicesReference $iconChoicesReference -SelectionBrokerClsidRoot $dryRunBrokerClsid `
+        -DirectoryShellRoot $registryRoot -WhatIf)
     Assert-Equal $registryPlan.Count $dryRun.Count 'dry-run registration returns the complete disposable registry plan'
 
     foreach ($syntheticCount in @(0, 1, 10, 30, 50)) {
@@ -403,7 +479,8 @@ try {
         $syntheticPlan = @(Get-PfiRegistryPlan -Manifest $syntheticManifest `
             -InstallRoot $commandInstallRoot -RegistryRoot $registryRoot `
             -SubcommandsRoot $subcommandsRoot -SubcommandsReference $subcommandsReference `
-            -IconChoicesRoot $iconChoicesRoot -IconChoicesReference $iconChoicesReference)
+            -IconChoicesRoot $iconChoicesRoot -IconChoicesReference $iconChoicesReference `
+            -SelectionBrokerClsidRoot $dryRunBrokerClsid -SelectionBrokerHash $brokerHash)
         $syntheticIconVerbs = @($syntheticPlan | Where-Object {
             $_.Name -eq 'MUIVerb' -and
             $_.Path.StartsWith((Join-Path $iconChoicesRoot 'shell'), [StringComparison]::OrdinalIgnoreCase)
@@ -432,6 +509,8 @@ try {
     $testIconChoicesReference = $testReference + '.IconChoices'
     $testIconChoices = 'HKCU:\Software\Classes\' + $testIconChoicesReference
     $registryTestIconChoices = $testIconChoices
+    $testBrokerClsid = 'HKCU:\Software\Classes\CLSID\{' + [guid]::NewGuid().ToString().ToUpperInvariant() + '}'
+    $registryTestBrokerClsid = $testBrokerClsid
     $unrelated = Join-Path $testDirectoryShell 'UnrelatedTool'
     [void](New-Item -Path (Join-Path $unrelated 'command') -Force)
     Set-Item -LiteralPath $unrelated -Value 'Keep this integration'
@@ -451,29 +530,101 @@ try {
     Set-Item -LiteralPath (Join-Path $lookalike 'command') -Value '"C:\ThirdParty\color.exe" "%1"'
     Assert-Equal 10 @(Get-PfiRecognizedLegacyContextMenuPaths -DirectoryShellRoot $testDirectoryShell).Count 'all exact legacy prototype entries are recognized'
 
-    [void](Register-PfiContextMenu -Manifest $installedManifest -InstallRoot $commandInstallRoot `
+    $foreignBrokerClsid = 'HKCU:\Software\Classes\CLSID\{' + [guid]::NewGuid().ToString().ToUpperInvariant() + '}'
+    [void](New-Item -Path (Join-Path $foreignBrokerClsid 'LocalServer32') -Force)
+    Set-Item -LiteralPath $foreignBrokerClsid -Value 'Unrelated COM server'
+    Set-Item -LiteralPath (Join-Path $foreignBrokerClsid 'LocalServer32') -Value '"C:\Unrelated\server.exe"'
+    Assert-Throws {
+        Register-PfiContextMenu -Manifest $installedManifest -InstallRoot $installRoot `
+            -RegistryRoot $testParent -SubcommandsRoot $testSubcommands `
+            -SubcommandsReference $testReference -IconChoicesRoot $testIconChoices `
+            -IconChoicesReference $testIconChoicesReference `
+            -SelectionBrokerClsidRoot $foreignBrokerClsid -DirectoryShellRoot $testDirectoryShell
+    } 'registration refuses a malicious or unrelated CLSID lookalike'
+    Assert-Equal 'Unrelated COM server' ([string](Get-Item $foreignBrokerClsid).GetValue('')) `
+        'failed ownership guard preserves unrelated CLSID state exactly'
+    Remove-Item -LiteralPath $foreignBrokerClsid -Recurse -Force
+
+    [void](Register-PfiContextMenu -Manifest $installedManifest -InstallRoot $installRoot `
         -RegistryRoot $testParent -SubcommandsRoot $testSubcommands `
         -SubcommandsReference $testReference -IconChoicesRoot $testIconChoices `
-        -IconChoicesReference $testIconChoicesReference -DirectoryShellRoot $testDirectoryShell)
+        -IconChoicesReference $testIconChoicesReference `
+        -SelectionBrokerClsidRoot $testBrokerClsid -DirectoryShellRoot $testDirectoryShell)
     Assert-Equal $testReference ([string](Get-Item -LiteralPath $testParent).GetValue('ExtendedSubCommandsKey')) 'live parent has cascade reference'
     Assert-Equal $false (Test-Path -LiteralPath (Join-Path $testParent 'command')) 'live parent has no command handler'
     Assert-True (Test-Path -LiteralPath (Join-Path $testSubcommands 'shell')) 'referenced submenu storage exists'
     Assert-Equal $testSubcommands ('HKCU:\Software\Classes\' +
         [string](Get-Item -LiteralPath $testParent).GetValue('ExtendedSubCommandsKey')) 'submenu storage matches parent reference'
     Assert-Equal $acceptedCount @(Get-ChildItem -LiteralPath (Join-Path $testIconChoices 'shell') |
-        Where-Object PSChildName -like 'Icon_*').Count 'isolated registry contains ten icon actions'
+        Where-Object PSChildName -like 'PortableFolderIcons.Apply.*').Count 'isolated registry contains every icon action'
+    Assert-True (Test-Path -LiteralPath (Join-Path $testBrokerClsid 'LocalServer32')) `
+        'isolated registration contains the project-owned LocalServer32'
+    Assert-Equal $script:PfiSelectionBrokerOwner ([string](Get-Item $testBrokerClsid).GetValue('PfiOwner')) `
+        'isolated COM registration has the exact ownership marker'
     Assert-Equal 0 @(Get-ChildItem -LiteralPath $testDirectoryShell |
         Where-Object PSChildName -like 'FolderColor_*' |
         Where-Object PSChildName -ne 'FolderColor_Custom').Count 'recognized legacy Color entries are removed'
     Assert-True (Test-Path -LiteralPath $unrelated) 'unrelated context-menu entry survives setup cleanup'
     Assert-True (Test-Path -LiteralPath $lookalike) 'unrecognized Color lookalike survives setup cleanup'
 
-    $firstRegistryState = Get-TestRegistrySnapshot @($testParent, $testSubcommands, $testIconChoices, $testDirectoryShell)
-    [void](Register-PfiContextMenu -Manifest $installedManifest -InstallRoot $commandInstallRoot `
+    # Read actual isolated registration, not a second hardcoded list of names.
+    $contracts = @()
+    foreach ($verbRoot in @((Join-Path $testIconChoices 'shell'), (Join-Path $testSubcommands 'shell'))) {
+        foreach ($verb in @(Get-ChildItem -LiteralPath $verbRoot)) {
+            $verbAction = [string]$verb.GetValue('PfiAction')
+            if ($verbAction -in @('Apply', 'Reset')) {
+                $contracts += ($verb.PSChildName + "`t" + $verbAction + "`t" + [string]$verb.GetValue('PfiIconHash'))
+            }
+        }
+    }
+    $contractsPath = Join-Path $brokerHarnessDirectory 'registered-contracts.tsv'
+    [IO.File]::WriteAllLines($contractsPath, [string[]]$contracts, (New-Object Text.UTF8Encoding($false)))
+    $harnessName = 'actual Apply/Reset registration initializes the broker; selection occurrence/order and invalid identities are covered'
+    if (-not $nativeLaunchAuthorized) {
+        $script:Blocked.Add("BLOCKED_BY_ENDPOINT_SECURITY (withheld, not launched): $harnessName")
+        Write-Host ("  [BLOCKED] withheld compiled harness launch (authorize with -AllowNativeHarness or PFI_GATE_NATIVE_HARNESS=allow): {0}" -f $harnessName) -ForegroundColor Yellow
+    }
+    elseif ($brokerHarnessBuild.Status -ne 'READY') {
+        Assert-Equal 'PASS' $brokerHarnessBuild.Status ("{0} [harness unavailable: {1}]" -f $harnessName, $brokerHarnessBuild.Detail)
+    }
+    else {
+        $harnessPermission = Get-PfiNativeLaunchPermission -CacheRoot $brokerHarnessCacheRoot -Sha256 $brokerHarnessBuild.Sha256
+        if (-not $harnessPermission.Permitted) {
+            $script:Blocked.Add("BLOCKED_BY_ENDPOINT_SECURITY (previously blocked, not re-attempted): $harnessName :: $($harnessPermission.Reason)")
+            Write-Host ("  [BLOCKED] {0}" -f $harnessPermission.Reason) -ForegroundColor Yellow
+        }
+        else {
+            $harnessLaunch = Invoke-PfiNativeProcess -FilePath $brokerHarnessBuild.Executable -ArgumentList @($contractsPath) `
+                -WorkingDirectory $brokerHarnessBuild.Directory -TimeoutSeconds 300
+            $harnessOutcome = Get-PfiNativeOutcome -Launch $harnessLaunch -PassPattern '(?m)^Selection broker harness: (?<count>\d+) passed'
+            Add-PfiNativeLaunchRecord -CacheRoot $brokerHarnessCacheRoot -Record ([ordered]@{ platform = $selectionPlatform; mode = 'suite'
+                sha256 = $brokerHarnessBuild.Sha256; fingerprint = $brokerHarnessBuild.Fingerprint; status = $harnessOutcome.Status
+                exit = $(if ($harnessLaunch.Started) { [string]$harnessLaunch.ExitCode } else { 'not-started:' + $harnessLaunch.StartErrorCode })
+                assertions = $harnessOutcome.Assertions; detail = $harnessOutcome.Detail })
+            Write-Host $harnessLaunch.StdOut
+            if ($harnessOutcome.Status -eq 'BLOCKED_BY_ENDPOINT_SECURITY') {
+                # Launch refused by the OS: a security-policy block, not a harness verdict.
+                $script:Blocked.Add("BLOCKED_BY_ENDPOINT_SECURITY (launch denied): $harnessName :: $($harnessOutcome.Detail)")
+                Write-Host ("  [BLOCKED] compiled harness launch denied: {0}" -f $harnessOutcome.Detail) -ForegroundColor Yellow
+            }
+            elseif ($harnessOutcome.Status -eq 'BLOCKED') {
+                $script:Blocked.Add("BLOCKED (harness not executed): $harnessName :: $($harnessOutcome.Detail)")
+                Write-Host ("  [BLOCKED] compiled harness not executed: {0}" -f $harnessOutcome.Detail) -ForegroundColor Yellow
+            }
+            else {
+                # PASS needs exit 0 and the harness's own pass line; FAIL and CRASH are reported with their cause.
+                Assert-Equal 'PASS' $harnessOutcome.Status ("{0} [{1}]" -f $harnessName, $harnessOutcome.Detail)
+            }
+        }
+    }
+
+    $firstRegistryState = Get-TestRegistrySnapshot @($testParent, $testSubcommands, $testIconChoices, $testBrokerClsid, $testDirectoryShell)
+    [void](Register-PfiContextMenu -Manifest $installedManifest -InstallRoot $installRoot `
         -RegistryRoot $testParent -SubcommandsRoot $testSubcommands `
         -SubcommandsReference $testReference -IconChoicesRoot $testIconChoices `
-        -IconChoicesReference $testIconChoicesReference -DirectoryShellRoot $testDirectoryShell)
-    $secondRegistryState = Get-TestRegistrySnapshot @($testParent, $testSubcommands, $testIconChoices, $testDirectoryShell)
+        -IconChoicesReference $testIconChoicesReference `
+        -SelectionBrokerClsidRoot $testBrokerClsid -DirectoryShellRoot $testDirectoryShell)
+    $secondRegistryState = Get-TestRegistrySnapshot @($testParent, $testSubcommands, $testIconChoices, $testBrokerClsid, $testDirectoryShell)
     Assert-Equal $firstRegistryState $secondRegistryState 'repeated registration is idempotent'
 
     $reducedManifest = $installedManifest | ConvertTo-Json -Depth 8 | ConvertFrom-Json
@@ -481,14 +632,16 @@ try {
     $reducedManifest.entries = @($reducedManifest.entries | Where-Object {
         $_.hash -ne $removedEntry.hash
     })
-    [void](Register-PfiContextMenu -Manifest $reducedManifest -InstallRoot $commandInstallRoot `
+    [void](Register-PfiContextMenu -Manifest $reducedManifest -InstallRoot $installRoot `
         -RegistryRoot $testParent -SubcommandsRoot $testSubcommands `
         -SubcommandsReference $testReference -IconChoicesRoot $testIconChoices `
-        -IconChoicesReference $testIconChoicesReference -DirectoryShellRoot $testDirectoryShell)
+        -IconChoicesReference $testIconChoicesReference `
+        -SelectionBrokerClsidRoot $testBrokerClsid -DirectoryShellRoot $testDirectoryShell)
     Assert-Equal ($acceptedCount - 1) @(Get-ChildItem -LiteralPath (Join-Path $testIconChoices 'shell') |
-        Where-Object PSChildName -like 'Icon_*').Count 'rescan removes obsolete submenu action'
+        Where-Object PSChildName -like 'PortableFolderIcons.Apply.*').Count 'rescan removes obsolete submenu action'
     Assert-Equal 0 @(Get-ChildItem -LiteralPath (Join-Path $testIconChoices 'shell') |
-        Where-Object PSChildName -match ([regex]::Escape([string]$removedEntry.hash))).Count 'removed ICO hash is absent from submenu'
+        Where-Object { [string]$_.GetValue('PfiIconHash') -ceq [string]$removedEntry.hash }).Count `
+        'removed ICO hash is absent from submenu properties'
 
     $legacyBlue = Join-Path $testDirectoryShell 'FolderColor_Blue'
     [void](New-Item -Path (Join-Path $legacyBlue 'command') -Force)
@@ -497,11 +650,14 @@ try {
         '"C:\Old\pwsh.exe" -File "C:\Old\Portable-Folder-Colours\SetFolderColor.ps1" ' +
         '-folderPath "%1" -iconPath "C:\Old\Portable-Folder-Colours\Folder_Blue.ico,0"'
     )
-    Remove-PfiContextMenu -RegistryRoot $testParent -SubcommandsRoot $testSubcommands `
-        -IconChoicesRoot $testIconChoices -DirectoryShellRoot $testDirectoryShell -Confirm:$false
+    Remove-PfiContextMenu -InstallRoot $installRoot -RegistryRoot $testParent `
+        -SubcommandsRoot $testSubcommands -IconChoicesRoot $testIconChoices `
+        -SelectionBrokerClsidRoot $testBrokerClsid `
+        -DirectoryShellRoot $testDirectoryShell -Confirm:$false
     Assert-Equal $false (Test-Path -LiteralPath $testParent) 'uninstall removes current parent menu'
     Assert-Equal $false (Test-Path -LiteralPath $testSubcommands) 'uninstall removes submenu storage'
     Assert-Equal $false (Test-Path -LiteralPath $testIconChoices) 'uninstall removes icon chooser storage'
+    Assert-Equal $false (Test-Path -LiteralPath $testBrokerClsid) 'uninstall removes exact owned COM registration'
     Assert-Equal $false (Test-Path -LiteralPath $legacyBlue) 'uninstall removes recognized legacy menu'
     Assert-True (Test-Path -LiteralPath $unrelated) 'unrelated context-menu entry survives uninstall'
     Assert-True (Test-Path -LiteralPath $lookalike) 'unrecognized Color lookalike survives uninstall'
@@ -514,6 +670,174 @@ try {
         "[.ShellClassInfo]`r`nInfoTip=Preserve this`r`n[ViewState]`r`nFolderType=Generic`r`n"
     )
     $actionEntry = @($installedManifest.entries | Where-Object validationState -eq 'Accepted')[0]
+
+    $zeroBatch = Invoke-PfiBatchAction -Action Reset -TargetPath @() `
+        -InstallRoot $installRoot -SkipRefresh
+    Assert-Equal 0 $zeroBatch.SelectedCount 'zero-target batch is represented without inventing a target'
+    Assert-Equal 0 $zeroBatch.AttemptedCount 'zero-target batch performs no operation'
+
+    foreach ($selectionCount in @(1, 2, 10, 30, 100)) {
+        $selectionFolders = New-Object System.Collections.Generic.List[string]
+        foreach ($selectionIndex in 1..$selectionCount) {
+            $selectionFolder = Join-Path $testRoot `
+                ('Batch-{0:D3}-{1:D3}' -f $selectionCount, $selectionIndex)
+            [void](New-Item -ItemType Directory -Path $selectionFolder)
+            $selectionFolders.Add($selectionFolder)
+        }
+        $selectionResult = Invoke-PfiBatchAction -Action Reset `
+            -TargetPath $selectionFolders.ToArray() -InstallRoot $installRoot -SkipRefresh
+        Assert-Equal $selectionCount $selectionResult.SelectedCount `
+            ("batch preserves selected count {0}" -f $selectionCount)
+        Assert-Equal $selectionCount $selectionResult.SuccessCount `
+            ("batch processes all {0} targets sequentially" -f $selectionCount)
+        Assert-Equal (($selectionFolders.ToArray()) -join [char]30) `
+            ((@($selectionResult.Results | Select-Object -ExpandProperty InputPath)) -join [char]30) `
+            ("batch preserves occurrence/order for {0} targets" -f $selectionCount)
+    }
+
+    $specialBatchFolders = @(
+        (Join-Path $testRoot 'Batch spaces'),
+        (Join-Path $testRoot 'Batch üñîçødé'),
+        (Join-Path $testRoot 'Batch & ampersand'),
+        (Join-Path $testRoot "Batch O'Brien"),
+        (Join-Path $testRoot 'Batch (parentheses)'),
+        (Join-Path $testRoot 'Batch % percent'),
+        (Join-Path $testRoot 'Batch ! exclamation')
+    )
+    foreach ($specialBatchFolder in $specialBatchFolders) {
+        [void](New-Item -ItemType Directory -Path $specialBatchFolder)
+    }
+    $specialBatch = Invoke-PfiBatchAction -Action Apply -TargetPath $specialBatchFolders `
+        -IconHash $actionEntry.hash -InstallRoot $installRoot -SkipRefresh
+    Assert-Equal $specialBatchFolders.Count $specialBatch.SuccessCount `
+        'multi-folder Apply supports shell-sensitive and Unicode paths'
+    $repeatedSpecialBatch = Invoke-PfiBatchAction -Action Apply -TargetPath $specialBatchFolders `
+        -IconHash $actionEntry.hash -InstallRoot $installRoot -SkipRefresh
+    Assert-Equal $specialBatchFolders.Count $repeatedSpecialBatch.SuccessCount `
+        'repeating the same multi-folder Apply action remains safe'
+    $specialReset = Invoke-PfiBatchAction -Action Reset -TargetPath $specialBatchFolders `
+        -InstallRoot $installRoot -SkipRefresh
+    Assert-Equal $specialBatchFolders.Count $specialReset.SuccessCount `
+        'multi-folder Reset supports the same shell-sensitive selection'
+    $longFolder = Join-Path $testRoot (('Long Path Segment ' * 7).Trim() + '-ü')
+    [void](New-Item -ItemType Directory -Path $longFolder)
+    $lookalikeLatin = Join-Path $testRoot 'Lookalike o'
+    $lookalikeGreek = Join-Path $testRoot ('Lookalike ' + [char]0x03BF)
+    [void](New-Item -ItemType Directory -Path $lookalikeLatin)
+    [void](New-Item -ItemType Directory -Path $lookalikeGreek)
+    $identityBatch = Invoke-PfiBatchAction -Action Reset `
+        -TargetPath @($longFolder, $lookalikeLatin, $lookalikeGreek) `
+        -InstallRoot $installRoot -SkipRefresh
+    Assert-Equal 3 $identityBatch.SuccessCount 'currently supported long and lookalike paths process independently'
+    Assert-Equal ($longFolder + [char]30 + $lookalikeLatin + [char]30 + $lookalikeGreek) `
+        (($identityBatch.Results.InputPath) -join [char]30) `
+        'long and identical-looking distinct paths are not normalized into one target'
+
+    $mixedFirst = Join-Path $testRoot 'Mixed First'
+    $mixedLater = Join-Path $testRoot 'Mixed Later'
+    [void](New-Item -ItemType Directory -Path $mixedFirst)
+    [void](New-Item -ItemType Directory -Path $mixedLater)
+    $missingMiddle = Join-Path $testRoot 'Mixed Missing'
+    $mixedResult = Invoke-PfiBatchAction -Action Reset `
+        -TargetPath @($mixedFirst, $missingMiddle, $mixedLater) `
+        -InstallRoot $installRoot -SkipRefresh
+    Assert-Equal 3 $mixedResult.SelectedCount 'mixed batch retains every supplied occurrence'
+    Assert-Equal 2 $mixedResult.SuccessCount 'mixed batch continues to a valid later target'
+    Assert-Equal 1 $mixedResult.RejectedCount 'mixed batch reports invalid target independently'
+    Assert-Equal 'Succeeded,Rejected,Succeeded' (($mixedResult.Results.Status) -join ',') `
+        'mixed batch preserves ordered per-target outcomes'
+
+    $failureFolders = @(
+        (Join-Path $testRoot 'Failure One'),
+        (Join-Path $testRoot 'Failure Middle'),
+        (Join-Path $testRoot 'Failure Later')
+    )
+    foreach ($failureFolder in $failureFolders) {
+        [void](New-Item -ItemType Directory -Path $failureFolder)
+    }
+    [IO.File]::WriteAllText((Join-Path $failureFolders[1] 'desktop.ini'), "[broken`r`n")
+    $middleFailure = Invoke-PfiBatchAction -Action Apply -TargetPath $failureFolders `
+        -IconHash $actionEntry.hash -InstallRoot $installRoot -SkipRefresh -WarningAction SilentlyContinue
+    Assert-Equal 'Succeeded,Failed,Succeeded' (($middleFailure.Results.Status) -join ',') `
+        'one middle operation failure does not prevent a later Apply'
+    Assert-Equal 2 $middleFailure.SuccessCount 'successful targets are not rolled back after another failure'
+    Assert-True (Test-Path -LiteralPath (Join-Path $failureFolders[2] 'desktop.ini')) `
+        'later target is actually customized after a middle failure'
+
+    foreach ($failureFolder in @($failureFolders[0], $failureFolders[2])) {
+        $failureIni = Join-Path $failureFolder 'desktop.ini'
+        [IO.File]::SetAttributes($failureIni, [IO.FileAttributes]::Normal)
+        [IO.File]::WriteAllText($failureIni, "[broken`r`n")
+    }
+    $allFailure = Invoke-PfiBatchAction -Action Apply -TargetPath $failureFolders `
+        -IconHash $actionEntry.hash -InstallRoot $installRoot -SkipRefresh -WarningAction SilentlyContinue
+    Assert-Equal 3 $allFailure.FailureCount 'all-target failure is aggregated after every attempt'
+    Assert-Equal 3 $allFailure.AttemptedCount 'all failing targets are attempted sequentially'
+    $allFailureText = Format-PfiAggregateResult $allFailure
+    foreach ($failureFolder in $failureFolders) {
+        Assert-True ($allFailureText.Contains($failureFolder)) `
+            'aggregate result never silently hides a failed folder'
+    }
+
+    $payloadSpecialPaths = @($specialBatchFolders + $specialBatchFolders[1])
+    $validPayloadInfo = Write-TestSelectionPayload $installRoot Apply $payloadSpecialPaths $actionEntry.hash
+    $validPayload = Read-PfiSelectionPayload $installRoot $validPayloadInfo.Token $validPayloadInfo.Hash
+    Assert-Equal ($payloadSpecialPaths -join [char]30) ($validPayload.Paths -join [char]30) `
+        'payload round trip preserves Unicode, shell characters, order, and duplicate occurrence'
+    Assert-Equal $actionEntry.hash $validPayload.IconHash 'payload round trip preserves manifest icon identity'
+    Assert-True (Remove-PfiSelectionPayload $installRoot $validPayloadInfo.Token) `
+        'consumed payload is removed from the exact owned request directory'
+    Assert-Equal $false (Test-Path -LiteralPath $validPayloadInfo.Path) 'payload cleanup removes only the consumed file'
+
+    Assert-Throws {
+        Read-PfiSelectionPayload $installRoot ([guid]::NewGuid().ToString('N')) ('0' * 64)
+    } 'missing payload is rejected safely'
+    Assert-Throws {
+        Read-PfiSelectionPayload $installRoot '../escape' ('0' * 64)
+    } 'payload token cannot escape the owned request directory'
+
+    $malformedToken = [guid]::NewGuid().ToString('N')
+    $malformedPath = Get-PfiSelectionPayloadPath $installRoot $malformedToken
+    [IO.File]::WriteAllText($malformedPath, '{bad json', (New-Object Text.UTF8Encoding($false)))
+    $malformedBytes = [IO.File]::ReadAllBytes($malformedPath)
+    Assert-Throws {
+        Read-PfiSelectionPayload $installRoot $malformedToken (Get-PfiSha256Bytes $malformedBytes)
+    } 'malformed payload is rejected without evaluation'
+
+    $stalePayload = Write-TestSelectionPayload $installRoot Reset @($mixedFirst) '' `
+        ([DateTime]::UtcNow.AddMinutes(-30))
+    Assert-Throws {
+        Read-PfiSelectionPayload $installRoot $stalePayload.Token $stalePayload.Hash
+    } 'stale payload is rejected by a bounded age check'
+    $invalidActionPayload = Write-TestSelectionPayload $installRoot Bogus @($mixedFirst) ''
+    Assert-Throws {
+        Read-PfiSelectionPayload $installRoot $invalidActionPayload.Token $invalidActionPayload.Hash
+    } 'invalid payload action is rejected'
+    $invalidHashPayload = Write-TestSelectionPayload $installRoot Apply @($mixedFirst) 'bad'
+    Assert-Throws {
+        Read-PfiSelectionPayload $installRoot $invalidHashPayload.Token $invalidHashPayload.Hash
+    } 'invalid payload icon hash is rejected'
+    $emptyPayload = Write-TestSelectionPayload -InstallRoot $installRoot -Action Reset `
+        -Paths ([string[]]@()) -IconHash ''
+    Assert-Throws {
+        Read-PfiSelectionPayload $installRoot $emptyPayload.Token $emptyPayload.Hash
+    } 'empty payload selection is rejected safely'
+    $tamperedPayload = Write-TestSelectionPayload $installRoot Reset @($mixedFirst) ''
+    [IO.File]::AppendAllText($tamperedPayload.Path, 'tamper')
+    Assert-Throws {
+        Read-PfiSelectionPayload $installRoot $tamperedPayload.Token $tamperedPayload.Hash
+    } 'payload tampering is detected by the broker-supplied SHA-256'
+
+    $concurrentA = Write-TestSelectionPayload $installRoot Reset @($mixedFirst, $mixedLater) ''
+    $concurrentB = Write-TestSelectionPayload $installRoot Reset @($mixedLater, $mixedFirst) ''
+    Assert-True ($concurrentA.Token -cne $concurrentB.Token) 'concurrent payload identities are collision-safe'
+    Assert-Equal ($mixedFirst + [char]30 + $mixedLater) `
+        ((Read-PfiSelectionPayload $installRoot $concurrentA.Token $concurrentA.Hash).Paths -join [char]30) `
+        'first concurrent payload remains independent'
+    Assert-Equal ($mixedLater + [char]30 + $mixedFirst) `
+        ((Read-PfiSelectionPayload $installRoot $concurrentB.Token $concurrentB.Hash).Paths -join [char]30) `
+        'second concurrent payload remains independent'
+
     $actionApply = Invoke-PfiApply -TargetPath @($actionFolder) -IconHash $actionEntry.hash `
         -InstallRoot $installRoot -SkipRefresh
     $afterApply = [IO.File]::ReadAllText($actionIni)
@@ -831,7 +1155,7 @@ try {
     Assert-True ($dispatcherText.Contains('Read-PfiInstalledSettings')) 'dispatcher uses installed settings instead of repository config'
 
     # Constraints that must hold across the whole runtime.
-    $runtimeSources = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'scripts\Windows') -File -Filter '*.ps1')
+    $runtimeSources = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'scripts\Windows') -File -Filter '*.ps1' -Recurse)
     foreach ($source in $runtimeSources) {
         $sourceText = Get-Content -LiteralPath $source.FullName -Raw
         Assert-Equal $false ($sourceText -match '(?i)Stop-Process\s+.*explorer') ('no Explorer process termination in ' + $source.Name)
@@ -850,15 +1174,37 @@ try {
     $cleanupText = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\Windows\Cleanup-PortableFolderIcons.ps1') -Raw
     Assert-True ($cleanupText -match '(?s)for \(\$attempt.*?Get-Process -Id \$ParentProcessId.*?break') 'uninstall cleanup sleep is a bounded poll on parent process exit'
     $integrationText = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\Windows\PortableFolderIcons.Integration.ps1') -Raw
-    Assert-True ($integrationText.Contains("if (`$Action -in @('Apply', 'Reset') -and -not `$DeveloperMode)")) `
-        'normal Apply and Reset route through the windowless launcher'
+    Assert-True ($integrationText.Contains("'DelegateExecute' `$script:PfiSelectionBrokerClsid")) `
+        'Apply and Reset route through the shared COM selection broker'
+    Assert-True ($integrationText.Contains("'MultiSelectModel' 'Player'")) `
+        'selection verbs opt into the uncapped COM Player selection model'
     $hiddenLauncherText = Get-Content -LiteralPath (
         Join-Path $repoRoot 'scripts\Windows\Invoke-PortableFolderIcons.Hidden.vbs'
     ) -Raw
     Assert-True ($hiddenLauncherText.Contains('shell.Run(command, 0, True)')) `
         'windowless launcher uses hidden window style and waits for completion'
+    Assert-True ($hiddenLauncherText.Contains('-SelectionToken')) `
+        'windowless launcher supports the fixed-size selection payload token'
+    Assert-True ($hiddenLauncherText.Contains('-PayloadHash')) `
+        'windowless launcher authenticates the selection payload by SHA-256'
     Assert-True ($hiddenLauncherText.Contains('EncodeUtf16Hex(targetPath)')) `
-        'windowless launcher transports shell-sensitive Unicode targets as hex'
+        'windowless launcher retains backward-compatible single-target Unicode transport'
+
+    $brokerSourceText = Get-Content -LiteralPath (
+        Join-Path $repoRoot 'scripts\Windows\SelectionHandler\PortableFolderIcons.SelectionBroker.cs'
+    ) -Raw
+    foreach ($interfaceName in @('IExecuteCommand', 'IObjectWithSelection', 'IInitializeCommand', 'IShellItemArray')) {
+        Assert-True ($brokerSourceText.Contains($interfaceName)) `
+            ('selection broker implements the documented ' + $interfaceName + ' contract')
+    }
+    Assert-True ($brokerSourceText.Contains('Guid.NewGuid().ToString("N")')) `
+        'every selection payload receives a collision-resistant invocation token'
+    Assert-True ($brokerSourceText.Contains('DataContractJsonSerializer')) `
+        'selection payload serialization is structured Unicode JSON rather than executable source'
+    Assert-True ($brokerSourceText.Contains('SelectionTransport.ReadAll(new ShellSelectionPathSource(selection))')) `
+        'the handler enumerates the entire supplied selection through its tested seam'
+    Assert-Equal $false ($brokerSourceText.Contains('HKLM')) `
+        'selection broker contains no machine-wide registry dependency'
 
     $emptyFolder = Join-Path $testRoot 'Empty Reset'
     [void](New-Item -ItemType Directory -Path $emptyFolder)
@@ -935,6 +1281,9 @@ try {
     Assert-Equal $false (Test-Path -LiteralPath (Join-Path $uninstallRoot 'icons')) 'explicit purge removes cache'
 }
 finally {
+    if ($null -ne $registryTestBrokerClsid -and (Test-Path -LiteralPath $registryTestBrokerClsid)) {
+        Remove-Item -LiteralPath $registryTestBrokerClsid -Recurse -Force
+    }
     if ($null -ne $registryTestIconChoices -and (Test-Path -LiteralPath $registryTestIconChoices)) {
         Remove-Item -LiteralPath $registryTestIconChoices -Recurse -Force
     }
@@ -949,6 +1298,8 @@ finally {
     }
 }
 
-Write-Host ('Tests: {0} passed, {1} failed' -f $script:Passed, $script:Failed)
+Write-Host ('Tests: {0} passed, {1} failed, {2} blocked' -f $script:Passed, $script:Failed, $script:Blocked.Count)
+foreach ($blockedCheck in $script:Blocked) { Write-Host ('  BLOCKED: {0}' -f $blockedCheck) }
 if ($script:Failed -gt 0) { exit 1 }
+if ($script:Blocked.Count -gt 0) { exit 3 }
 exit 0
