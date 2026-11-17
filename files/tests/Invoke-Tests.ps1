@@ -99,6 +99,104 @@ function Get-TestRegistrySnapshot {
     return ($lines -join "`n")
 }
 
+# Phase 0B (ADR 015) helpers. Written independently of the product's layout code: they read a registry plan or the
+# live isolated registry and describe the menu a user would get, so the assertions compare it with expected values.
+function New-TestMenuEntries {
+    # $Count accepted entries whose labels alternate case ('icon 001', 'Icon 002', ...), returned in reverse order,
+    # so a correct case-insensitive alphabetical sort is the numeric order and an ordinal or input-order sort is not.
+    param([int]$Count, [string[]]$Labels)
+    $entries = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Labels) {
+        $Labels = @(for ($i = 1; $i -le $Count; $i++) { ('{0} {1:D3}' -f $(if ($i % 2) { 'icon' } else { 'Icon' }), $i) })
+    }
+    for ($i = $Labels.Count; $i -ge 1; $i--) {
+        $hash = ('{0:x}' -f (0xC000 + $i)).PadLeft(64, '0')
+        $entries.Add([pscustomobject]@{
+            menuLabel = [string]$Labels[$i - 1]
+            originalFilename = ('Icon_{0:D4}.ico' -f $i)
+            hash = $hash
+            cachedFilename = ($hash + '.ico')
+            validationState = 'Accepted'
+        })
+    }
+    return $entries.ToArray()
+}
+
+function Get-TestPlanMenu {
+    # Menu described by a registry plan: utility keys of the primary submenu, chooser verbs and overflow entries.
+    param([object[]]$Plan, [string]$RegistryRoot, [string]$SubcommandsRoot, [string]$IconChoicesRoot)
+    $subShell = (Join-Path $SubcommandsRoot 'shell') + '\'
+    $verbPattern = '^' + [regex]::Escape($IconChoicesRoot) +
+        '(?:\.More(?<page>\d{2}))?\\shell\\(?<verb>PortableFolderIcons\.Apply\.\d{4})$'
+    $parentPattern = '^' + [regex]::Escape($RegistryRoot) + '\.More\.(?<page>\d{2})$'
+    $utilities = @(); $verbs = @(); $parents = @()
+    foreach ($item in @($Plan | Where-Object { $_.Name -ceq 'MUIVerb' })) {
+        $path = [string]$item.Path
+        if ($path.StartsWith($subShell, [StringComparison]::OrdinalIgnoreCase) -and $path.Substring($subShell.Length) -notmatch '\\') {
+            $utilities += [pscustomobject]@{ Key = $path.Substring($subShell.Length); Label = [string]$item.Value; Path = $path }
+            continue
+        }
+        $verbMatch = [regex]::Match($path, $verbPattern, 'IgnoreCase')
+        if ($verbMatch.Success) {
+            $page = if ($verbMatch.Groups['page'].Success) { [int]$verbMatch.Groups['page'].Value } else { 0 }
+            $props = @{}
+            foreach ($p in @($Plan | Where-Object { $_.Path -ceq $path })) { $props[[string]$p.Name] = [string]$p.Value }
+            $delegate = @($Plan | Where-Object { $_.Path -ceq ($path + '\command') -and $_.Name -ceq 'DelegateExecute' })
+            $verbs += [pscustomobject]@{ Page = $page; Verb = $verbMatch.Groups['verb'].Value; Label = [string]$item.Value
+                Action = $props['PfiAction']; Hash = $props['PfiIconHash']; MultiSelect = $props['MultiSelectModel']
+                Delegate = $(if ($delegate.Count -eq 1) { [string]$delegate[0].Value } else { '' }) }
+            continue
+        }
+        $parentMatch = [regex]::Match($path, $parentPattern, 'IgnoreCase')
+        if ($parentMatch.Success) {
+            $props = @{}
+            foreach ($p in @($Plan | Where-Object { $_.Path -ceq $path })) { $props[[string]$p.Name] = [string]$p.Value }
+            $parents += [pscustomobject]@{ Page = [int]$parentMatch.Groups['page'].Value; Label = [string]$item.Value
+                SubKey = $props['ExtendedSubCommandsKey']; MultiSelect = $props['MultiSelectModel']
+                HasCommand = (@($Plan | Where-Object { $_.Path -like ($path + '\*') }).Count -gt 0) }
+        }
+    }
+    $utilities = @($utilities | Sort-Object Key)
+    $verbs = @($verbs | Sort-Object Page, Verb)
+    $parents = @($parents | Sort-Object Page)
+    $pageSizes = @(foreach ($parent in $parents) { @($verbs | Where-Object Page -eq $parent.Page).Count })
+    return [pscustomobject]@{
+        Utilities = $utilities; Verbs = $verbs; Parents = $parents
+        Layout = ('{0}|{1}' -f @($verbs | Where-Object Page -eq 0).Count, ($pageSizes -join ','))
+        PrimaryTreeEntries = $utilities.Count + @($verbs | Where-Object Page -eq 0).Count
+        LargestOverflowTree = $(if ($pageSizes.Count) { ($pageSizes | Measure-Object -Maximum).Maximum } else { 0 })
+    }
+}
+
+function Get-TestOverflowKeys {
+    # Live overflow keys next to the primary parent ('<parent>.More.NN') and the chooser store ('<store>.MoreNN').
+    param([string]$ParentRoot, [string]$IconChoicesRoot)
+    $found = @()
+    foreach ($pair in @(@($ParentRoot, '\.More\.\d{2}'), @($IconChoicesRoot, '\.More\d{2}'))) {
+        $container = Split-Path -Parent $pair[0]
+        $pattern = '^' + [regex]::Escape((Split-Path -Leaf $pair[0])) + $pair[1] + '$'
+        $found += @(@((Get-Item -LiteralPath $container).GetSubKeyNames()) | Where-Object { $_ -match $pattern } |
+            Sort-Object | ForEach-Object { Join-Path $container $_ })
+    }
+    return $found
+}
+
+function Get-TestRegisteredApplyVerbs {
+    # Live Apply verb keys in menu order: the chooser store first, then each overflow store by number.
+    param([string]$ParentRoot, [string]$IconChoicesRoot)
+    $stores = @($IconChoicesRoot) + @(Get-TestOverflowKeys $ParentRoot $IconChoicesRoot |
+        Where-Object { $_ -notlike ($ParentRoot + '.More.*') })
+    $verbs = @()
+    foreach ($store in $stores) {
+        $shell = Join-Path $store 'shell'
+        if (Test-Path -LiteralPath $shell) {
+            $verbs += @(Get-ChildItem -LiteralPath $shell | Where-Object PSChildName -like 'PortableFolderIcons.Apply.*' |
+                Sort-Object PSChildName)
+        }
+    }
+    return $verbs
+}
+
 function New-TestExplorerWindow {
     param([string]$LocationUrl, [long]$WindowHandle = 0)
 
@@ -157,6 +255,7 @@ $registryTestBase = $null
 $registryTestSubcommands = $null
 $registryTestIconChoices = $null
 $registryTestBrokerClsid = $null
+$registryTestReference = $null
 try {
     $selectionSourceRoot = Join-Path $repoRoot 'scripts\Windows\SelectionHandler'
     $selectionBuildManifest = Read-PfiSelectionBrokerBuildManifest `
@@ -354,39 +453,38 @@ try {
         -IconChoicesRoot $iconChoicesRoot -IconChoicesReference $iconChoicesReference `
         -SelectionBrokerClsidRoot $dryRunBrokerClsid -SelectionBrokerHash $brokerHash `
         -PowerShellPath 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe')
-    Assert-Equal $acceptedCount @($registryPlan | Where-Object {
-        $_.Path.StartsWith((Join-Path $iconChoicesRoot 'shell'), [StringComparison]::OrdinalIgnoreCase) -and
-        $_.Name -eq 'MUIVerb'
-    }).Count 'registry plan contains one icon verb per accepted ICO'
-    $iconLabels = @($registryPlan | Where-Object {
-        $_.Name -eq 'MUIVerb' -and
-        $_.Path.StartsWith((Join-Path $iconChoicesRoot 'shell'), [StringComparison]::OrdinalIgnoreCase)
-    } | Select-Object -ExpandProperty Value)
+    $installedPlanMenu = Get-TestPlanMenu $registryPlan $registryRoot $subcommandsRoot $iconChoicesRoot
+    Assert-Equal $acceptedCount $installedPlanMenu.Verbs.Count `
+        'registry plan contains one icon verb per accepted ICO across the chooser and overflow entries'
+    $iconLabels = @($installedPlanMenu.Verbs | Select-Object -ExpandProperty Label)
     $expectedLabels = @($acceptedEntries | Sort-Object menuLabel | Select-Object -ExpandProperty menuLabel)
-    Assert-Equal ($expectedLabels -join ',') ($iconLabels -join ',') 'registry icon verbs are alphabetic'
+    Assert-Equal ($expectedLabels -join ',') ($iconLabels -join ',') 'registry icon verbs are alphabetic across the chooser and overflow entries'
     Assert-Equal 'Player' ($registryPlan | Where-Object {
         $_.Path -eq $registryRoot -and $_.Name -eq 'MultiSelectModel'
     }).Value 'registry enables COM Player multi-selection'
     Assert-Equal $subcommandsReference (
         $registryPlan | Where-Object { $_.Path -eq $registryRoot -and $_.Name -eq 'ExtendedSubCommandsKey' }
     ).Value 'parent references the separate submenu store'
-    $chooserPath = Join-Path (Join-Path $subcommandsRoot 'shell') 'Choice_0100_Icons'
-    Assert-Equal 'Choose Folder Icon' ($registryPlan | Where-Object {
+    # Phase 0B: the chooser key sorts after the utilities, so Reset, Repair and Uninstall come first (ADR 015).
+    $chooserPath = Join-Path (Join-Path $subcommandsRoot 'shell') 'Utility_0900_Choose_Icons'
+    Assert-Equal 'Choose Folder Icon' (@($registryPlan | Where-Object {
         $_.Path -eq $chooserPath -and $_.Name -eq 'MUIVerb'
-    }).Value 'parent menu contains one icon chooser'
-    Assert-Equal $iconChoicesReference ($registryPlan | Where-Object {
+    } | Select-Object -ExpandProperty Value) -join ',') 'parent menu contains one icon chooser'
+    Assert-Equal $iconChoicesReference (@($registryPlan | Where-Object {
         $_.Path -eq $chooserPath -and $_.Name -eq 'ExtendedSubCommandsKey'
-    }).Value 'icon chooser references separate scalable icon storage'
+    } | Select-Object -ExpandProperty Value) -join ',') 'icon chooser references separate scalable icon storage'
+    Assert-Equal 32 (@($registryPlan | Where-Object {
+        $_.Path -eq $chooserPath -and $_.Name -eq 'CommandFlags'
+    } | Select-Object -ExpandProperty Value) -join ',') 'a separator divides the utilities from the chooser (ECF_SEPARATORBEFORE)'
     Assert-Equal 0 @($registryPlan | Where-Object {
         $_.Path -eq (Join-Path $registryRoot 'command')
     }).Count 'parent has no executable command'
     Assert-Equal 0 @($registryPlan | Where-Object {
         $_.Path.StartsWith((Join-Path $registryRoot 'ExtendedSubCommandsKey'), [StringComparison]::OrdinalIgnoreCase)
     }).Count 'ExtendedSubCommandsKey is a value rather than a child key'
-    Assert-Equal $acceptedCount @($registryPlan | Where-Object {
-        $_.Path.StartsWith((Join-Path $iconChoicesRoot 'shell\PortableFolderIcons.Apply.'), [StringComparison]::OrdinalIgnoreCase) -and
-        $_.Name -eq 'MUIVerb'
-    }).Count 'every accepted ICO has exactly one stored submenu action'
+    Assert-Equal (@($acceptedEntries | Select-Object -ExpandProperty hash | Sort-Object) -join ',') `
+        (@($installedPlanMenu.Verbs | Select-Object -ExpandProperty Hash | Sort-Object) -join ',') `
+        'every accepted ICO has exactly one stored submenu action'
     Assert-Equal 0 @($registryPlan | Where-Object {
         $_.Path.StartsWith((Join-Path $subcommandsRoot 'shell\PortableFolderIcons.Apply.'), [StringComparison]::OrdinalIgnoreCase)
     }).Count 'utility parent contains no direct icon actions'
@@ -463,42 +561,113 @@ try {
         -DirectoryShellRoot $registryRoot -WhatIf)
     Assert-Equal $registryPlan.Count $dryRun.Count 'dry-run registration returns the complete disposable registry plan'
 
-    foreach ($syntheticCount in @(0, 1, 10, 30, 50)) {
-        $syntheticEntries = @()
-        for ($syntheticIndex = $syntheticCount; $syntheticIndex -gt 0; $syntheticIndex--) {
-            $syntheticHash = ('{0:x}' -f $syntheticIndex).PadLeft(64, '0')
-            $syntheticEntries += [pscustomobject]@{
-                menuLabel = ('Icon {0:D3}' -f $syntheticIndex)
-                originalFilename = ('Icon_{0:D3}.ico' -f $syntheticIndex)
-                hash = $syntheticHash
-                cachedFilename = ($syntheticHash + '.ico')
-                validationState = 'Accepted'
-            }
-        }
-        $syntheticManifest = [pscustomobject]@{ entries = $syntheticEntries }
-        $syntheticPlan = @(Get-PfiRegistryPlan -Manifest $syntheticManifest `
+    # Phase 0B (ADR 015): budgeted static menu. The expected allocation per inventory size is the active plan's table
+    # (primary chooser icons | icons in each overflow entry), written out here rather than computed by the code under test.
+    Assert-Equal 16 (Get-Variable -Scope Script -Name PfiStaticMenuEntryBudget -ValueOnly -ErrorAction SilentlyContinue) `
+        'static-menu entry budget is the value measured on this Windows build (ADR 015; re-measured by gate check c-0009)'
+    $getTestPlan = {
+        param([object[]]$Entries)
+        @(Get-PfiRegistryPlan -Manifest ([pscustomobject]@{ entries = $Entries }) `
             -InstallRoot $commandInstallRoot -RegistryRoot $registryRoot `
             -SubcommandsRoot $subcommandsRoot -SubcommandsReference $subcommandsReference `
             -IconChoicesRoot $iconChoicesRoot -IconChoicesReference $iconChoicesReference `
             -SelectionBrokerClsidRoot $dryRunBrokerClsid -SelectionBrokerHash $brokerHash)
-        $syntheticIconVerbs = @($syntheticPlan | Where-Object {
-            $_.Name -eq 'MUIVerb' -and
-            $_.Path.StartsWith((Join-Path $iconChoicesRoot 'shell'), [StringComparison]::OrdinalIgnoreCase)
-        })
-        Assert-Equal $syntheticCount $syntheticIconVerbs.Count `
-            ("scalable chooser contains exactly {0} icon action(s)" -f $syntheticCount)
-        Assert-Equal $(if ($syntheticCount -eq 0) { 0 } else { 1 }) @($syntheticPlan | Where-Object {
-            $_.Path -eq $chooserPath -and $_.Name -eq 'MUIVerb'
-        }).Count ("chooser presence is correct for {0} icon(s)" -f $syntheticCount)
-        Assert-Equal 3 @($syntheticPlan | Where-Object {
-            $_.Name -eq 'MUIVerb' -and $_.Value -in @(
-                'Reset to Default', 'Repair Portable Folder Icons', 'Uninstall Portable Folder Icons'
-            ) -and $_.Path.StartsWith((Join-Path $subcommandsRoot 'shell'), [StringComparison]::OrdinalIgnoreCase)
-        }).Count ("all utilities remain in parent for {0} icon(s)" -f $syntheticCount)
-        $syntheticLabels = @($syntheticIconVerbs | Select-Object -ExpandProperty Value)
-        Assert-Equal (($syntheticLabels | Sort-Object) -join ',') ($syntheticLabels -join ',') `
-            ("icon ordering is deterministic for {0} icon(s)" -f $syntheticCount)
     }
+    $enDash = [string][char]0x2013
+    $expectedLayouts = @(
+        @(0, '0|'), @(1, '1|'), @(10, '10|'), @(12, '12|'), @(13, '12|1'), @(16, '12|4'), @(21, '12|9'),
+        @(28, '12|16'), @(29, '12|16,1'), @(30, '12|16,2'), @(45, '12|16,16,1'), @(50, '12|16,16,6'),
+        @(120, '12|16,16,16,16,16,16,12')
+    )
+    foreach ($expectedLayout in $expectedLayouts) {
+        $n = [int]$expectedLayout[0]
+        $syntheticEntries = @(New-TestMenuEntries $n)
+        $syntheticPlan = @(& $getTestPlan $syntheticEntries)
+        $menu = Get-TestPlanMenu $syntheticPlan $registryRoot $subcommandsRoot $iconChoicesRoot
+        Assert-Equal ([string]$expectedLayout[1]) $menu.Layout `
+            ("{0} icon(s): chooser and overflow allocation matches the plan table" -f $n)
+        $expectedKeys = @('Utility_0100_Reset', 'Utility_0200_Repair', 'Utility_0300_Uninstall') +
+            @(if ($n -gt 0) { 'Utility_0900_Choose_Icons' })
+        $expectedUtilityLabels = @('Reset to Default', 'Repair Portable Folder Icons', 'Uninstall Portable Folder Icons') +
+            @(if ($n -gt 0) { 'Choose Folder Icon' })
+        Assert-Equal ($expectedKeys -join ',') (@($menu.Utilities | Select-Object -ExpandProperty Key) -join ',') `
+            ("{0} icon(s): primary submenu lists Reset, Repair and Uninstall first, then the chooser only with icons" -f $n)
+        Assert-Equal ($expectedUtilityLabels -join ',') (@($menu.Utilities | Select-Object -ExpandProperty Label) -join ',') `
+            ("{0} icon(s): primary submenu labels keep their names" -f $n)
+        $expectedOrdered = @(for ($i = 1; $i -le $n; $i++) { ('{0} {1:D3}' -f $(if ($i % 2) { 'icon' } else { 'Icon' }), $i) })
+        Assert-Equal ($expectedOrdered -join ',') (@($menu.Verbs | Select-Object -ExpandProperty Label) -join ',') `
+            ("{0} icon(s): every icon appears exactly once, case-insensitively alphabetical across chooser and overflow" -f $n)
+        Assert-Equal (@(for ($i = 1; $i -le $n; $i++) { 'PortableFolderIcons.Apply.{0:D4}' -f $i }) -join ',') `
+            (@($menu.Verbs | Select-Object -ExpandProperty Verb) -join ',') `
+            ("{0} icon(s): Apply command identities stay contiguous in menu order" -f $n)
+        Assert-Equal (@($syntheticEntries | Select-Object -ExpandProperty hash | Sort-Object) -join ',') `
+            (@($menu.Verbs | Select-Object -ExpandProperty Hash | Sort-Object) -join ',') `
+            ("{0} icon(s): every accepted hash is registered exactly once" -f $n)
+        Assert-True ($menu.PrimaryTreeEntries -le 16 -and $menu.LargestOverflowTree -le 16) `
+            ("{0} icon(s): each top-level menu tree has at most 16 entries depth-first (primary {1}, largest overflow {2})" -f
+                $n, $menu.PrimaryTreeEntries, $menu.LargestOverflowTree)
+        $expectedParentLabels = @(); $expectedSubKeys = @(); $pageNumber = 0
+        for ($start = 13; $start -le $n; $start += 16) {
+            $pageNumber++
+            $end = [Math]::Min($start + 15, $n)
+            $first = $expectedOrdered[$start - 1]; $last = $expectedOrdered[$end - 1]
+            $expectedParentLabels += $(if ($start -eq $end) { "Folder Icons ($first)" } else { "Folder Icons ($first$enDash$last)" })
+            $expectedSubKeys += ('{0}.More{1:D2}' -f $iconChoicesReference, $pageNumber)
+        }
+        Assert-Equal ($expectedParentLabels -join '|') (@($menu.Parents | Select-Object -ExpandProperty Label) -join '|') `
+            ("{0} icon(s): overflow entries carry alphabetical range labels" -f $n)
+        Assert-Equal ($expectedSubKeys -join '|') (@($menu.Parents | Select-Object -ExpandProperty SubKey) -join '|') `
+            ("{0} icon(s): each overflow entry references its own icon store" -f $n)
+        Assert-Equal (@(for ($p = 1; $p -le $pageNumber; $p++) { $p }) -join ',') `
+            (@($menu.Parents | Select-Object -ExpandProperty Page) -join ',') `
+            ("{0} icon(s): overflow entries are numbered contiguously from 01" -f $n)
+        Assert-Equal 0 @($menu.Parents | Where-Object { $_.MultiSelect -cne 'Player' -or $_.HasCommand }).Count `
+            ("{0} icon(s): overflow entries are Player cascades without a command" -f $n)
+        Assert-Equal 0 @($menu.Verbs | Where-Object {
+            $_.Action -cne 'Apply' -or $_.MultiSelect -cne 'Player' -or $_.Delegate -cne $script:PfiSelectionBrokerClsid
+        }).Count ("{0} icon(s): every Apply verb keeps PfiAction, Player and the broker DelegateExecute" -f $n)
+        Assert-Equal ($n + 1) @($syntheticPlan | Where-Object Name -eq 'DelegateExecute').Count `
+            ("{0} icon(s): the Apply verbs plus Reset are the only broker verbs" -f $n)
+    }
+
+    # Determinism: manifest order never changes the plan.
+    $orderEntries = @(New-TestMenuEntries 45)
+    $shuffleRandom = New-Object Random 20261116
+    $planText = { param([object[]]$Entries)
+        (@(& $getTestPlan $Entries) | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.Path, $_.Name, $_.Value, $_.Type }) -join "`n" }
+    $referencePlanText = & $planText $orderEntries
+    Assert-Equal $referencePlanText (& $planText @($orderEntries | Sort-Object { $shuffleRandom.Next() })) `
+        'registry plan is identical for a shuffled manifest (45 icons)'
+    Assert-Equal $referencePlanText (& $planText @($orderEntries[($orderEntries.Count - 1)..0])) `
+        'registry plan is identical for a reversed manifest (45 icons)'
+
+    # The development machine's 21 installed labels (synthetic hashes), given out of order: the boundary falls between
+    # Pink and Purple, and case does not affect order (ai < Black, code < CSPW).
+    $realLabels = @('ai', 'Black', 'Blue', 'code', 'CSPW', 'excel', 'GitHub', 'Gray', 'Green', 'markdown', 'Orange',
+        'Pink', 'Purple', 'python', 'react', 'Red', 'root', 'Teal', 'vscode', 'work', 'Yellow')
+    $realMenu = Get-TestPlanMenu @(& $getTestPlan @(New-TestMenuEntries 0 @($realLabels | Sort-Object Length, { $_ }))) `
+        $registryRoot $subcommandsRoot $iconChoicesRoot
+    Assert-Equal '12|9' $realMenu.Layout '21 installed labels: 12 in the chooser, 9 in one overflow entry'
+    Assert-Equal ($realLabels -join ',') (@($realMenu.Verbs | Select-Object -ExpandProperty Label) -join ',') `
+        '21 installed labels: case-insensitive alphabetical order across chooser and overflow'
+    Assert-Equal "Folder Icons (Purple${enDash}Yellow)" (@($realMenu.Parents | Select-Object -ExpandProperty Label) -join '|') `
+        '21 installed labels: overflow entry is labelled Folder Icons (Purple-Yellow) with an en dash'
+
+    # Long labels: each end of a range label is shortened to 40 characters; the icon verbs keep their full labels.
+    $longB = 'b' + ('LongName' * 8)
+    $longC = 'c' + ('Other' * 9)
+    $longLabels = @(for ($i = 1; $i -le 12; $i++) { 'a{0:D2}' -f $i }) + @($longB, $longC)
+    $longMenu = Get-TestPlanMenu @(& $getTestPlan @(New-TestMenuEntries 0 $longLabels)) `
+        $registryRoot $subcommandsRoot $iconChoicesRoot
+    $ellipsis = [string][char]0x2026
+    Assert-Equal ('Folder Icons ({0}{1}{2}{3}{1})' -f $longB.Substring(0, 39), $ellipsis, $enDash, $longC.Substring(0, 39)) `
+        (@($longMenu.Parents | Select-Object -ExpandProperty Label) -join '|') 'range label shortens each long end to 39 characters plus an ellipsis'
+    Assert-Equal "$longB,$longC" (@($longMenu.Verbs | Where-Object Page -eq 1 | Select-Object -ExpandProperty Label) -join ',') `
+        'icon verbs keep their full labels when the range label is shortened'
+
+    # Beyond 99 overflow entries the plan refuses instead of silently dropping icons.
+    Assert-Throws { [void](& $getTestPlan @(New-TestMenuEntries 1597)) } `
+        'registry plan refuses more icons than 99 overflow entries can hold (12 + 99 x 16 = 1596) instead of dropping any'
 
     $registryTestBase = 'HKCU:\Software\PortableFolderIcons\Tests\Cascade-' + [guid]::NewGuid().ToString('N')
     $testDirectoryShell = Join-Path $registryTestBase 'DirectoryShell'
@@ -506,6 +675,7 @@ try {
     $testReference = 'PortableFolderIcons.Tests.' + [guid]::NewGuid().ToString('N')
     $testSubcommands = 'HKCU:\Software\Classes\' + $testReference
     $registryTestSubcommands = $testSubcommands
+    $registryTestReference = $testReference
     $testIconChoicesReference = $testReference + '.IconChoices'
     $testIconChoices = 'HKCU:\Software\Classes\' + $testIconChoicesReference
     $registryTestIconChoices = $testIconChoices
@@ -555,8 +725,8 @@ try {
     Assert-True (Test-Path -LiteralPath (Join-Path $testSubcommands 'shell')) 'referenced submenu storage exists'
     Assert-Equal $testSubcommands ('HKCU:\Software\Classes\' +
         [string](Get-Item -LiteralPath $testParent).GetValue('ExtendedSubCommandsKey')) 'submenu storage matches parent reference'
-    Assert-Equal $acceptedCount @(Get-ChildItem -LiteralPath (Join-Path $testIconChoices 'shell') |
-        Where-Object PSChildName -like 'PortableFolderIcons.Apply.*').Count 'isolated registry contains every icon action'
+    Assert-Equal $acceptedCount @(Get-TestRegisteredApplyVerbs $testParent $testIconChoices).Count `
+        'isolated registry contains every icon action across the chooser and overflow stores'
     Assert-True (Test-Path -LiteralPath (Join-Path $testBrokerClsid 'LocalServer32')) `
         'isolated registration contains the project-owned LocalServer32'
     Assert-Equal $script:PfiSelectionBrokerOwner ([string](Get-Item $testBrokerClsid).GetValue('PfiOwner')) `
@@ -568,8 +738,12 @@ try {
     Assert-True (Test-Path -LiteralPath $lookalike) 'unrecognized Color lookalike survives setup cleanup'
 
     # Read actual isolated registration, not a second hardcoded list of names.
+    # Phase 0B: Apply verbs may also live in overflow stores, so every store feeds the contracts.
     $contracts = @()
-    foreach ($verbRoot in @((Join-Path $testIconChoices 'shell'), (Join-Path $testSubcommands 'shell'))) {
+    $contractRoots = @((Join-Path $testIconChoices 'shell'), (Join-Path $testSubcommands 'shell')) +
+        @(Get-TestOverflowKeys $testParent $testIconChoices | Where-Object { $_ -notlike ($testParent + '.More.*') } |
+            ForEach-Object { Join-Path $_ 'shell' })
+    foreach ($verbRoot in $contractRoots) {
         foreach ($verb in @(Get-ChildItem -LiteralPath $verbRoot)) {
             $verbAction = [string]$verb.GetValue('PfiAction')
             if ($verbAction -in @('Apply', 'Reset')) {
@@ -577,6 +751,8 @@ try {
             }
         }
     }
+    Assert-Equal ($acceptedCount + 1) $contracts.Count `
+        'registration-derived broker contracts cover every Apply verb in every icon store, plus Reset'
     $contractsPath = Join-Path $brokerHarnessDirectory 'registered-contracts.tsv'
     [IO.File]::WriteAllLines($contractsPath, [string[]]$contracts, (New-Object Text.UTF8Encoding($false)))
     $harnessName = 'actual Apply/Reset registration initializes the broker; selection occurrence/order and invalid identities are covered'
@@ -618,14 +794,16 @@ try {
         }
     }
 
-    $firstRegistryState = Get-TestRegistrySnapshot @($testParent, $testSubcommands, $testIconChoices, $testBrokerClsid, $testDirectoryShell)
+    $snapshotRoots = { @($testParent, $testSubcommands, $testIconChoices, $testBrokerClsid, $testDirectoryShell) +
+        @(Get-TestOverflowKeys $testParent $testIconChoices) }
+    $firstRegistryState = Get-TestRegistrySnapshot (& $snapshotRoots)
     [void](Register-PfiContextMenu -Manifest $installedManifest -InstallRoot $installRoot `
         -RegistryRoot $testParent -SubcommandsRoot $testSubcommands `
         -SubcommandsReference $testReference -IconChoicesRoot $testIconChoices `
         -IconChoicesReference $testIconChoicesReference `
         -SelectionBrokerClsidRoot $testBrokerClsid -DirectoryShellRoot $testDirectoryShell)
-    $secondRegistryState = Get-TestRegistrySnapshot @($testParent, $testSubcommands, $testIconChoices, $testBrokerClsid, $testDirectoryShell)
-    Assert-Equal $firstRegistryState $secondRegistryState 'repeated registration is idempotent'
+    $secondRegistryState = Get-TestRegistrySnapshot (& $snapshotRoots)
+    Assert-Equal $firstRegistryState $secondRegistryState 'repeated registration is idempotent (including any overflow entries)'
 
     $reducedManifest = $installedManifest | ConvertTo-Json -Depth 8 | ConvertFrom-Json
     $removedEntry = @($reducedManifest.entries | Where-Object validationState -eq 'Accepted')[0]
@@ -637,11 +815,64 @@ try {
         -SubcommandsReference $testReference -IconChoicesRoot $testIconChoices `
         -IconChoicesReference $testIconChoicesReference `
         -SelectionBrokerClsidRoot $testBrokerClsid -DirectoryShellRoot $testDirectoryShell)
-    Assert-Equal ($acceptedCount - 1) @(Get-ChildItem -LiteralPath (Join-Path $testIconChoices 'shell') |
-        Where-Object PSChildName -like 'PortableFolderIcons.Apply.*').Count 'rescan removes obsolete submenu action'
-    Assert-Equal 0 @(Get-ChildItem -LiteralPath (Join-Path $testIconChoices 'shell') |
+    Assert-Equal ($acceptedCount - 1) @(Get-TestRegisteredApplyVerbs $testParent $testIconChoices).Count `
+        'rescan removes obsolete submenu action'
+    Assert-Equal 0 @(Get-TestRegisteredApplyVerbs $testParent $testIconChoices |
         Where-Object { [string]$_.GetValue('PfiIconHash') -ceq [string]$removedEntry.hash }).Count `
         'removed ICO hash is absent from submenu properties'
+
+    # Phase 0B reconciliation (ADR 015): overflow entries follow the inventory through expansion and shrinkage, and
+    # lookalike or unrelated keys are never touched. Each step is (icons, overflow numbers, chooser|overflow sizes).
+    $overflowLookalikes = @(
+        (Join-Path $testDirectoryShell 'PortableFolderIcons.More.1'),
+        (Join-Path $testDirectoryShell 'PortableFolderIcons.More.001'),
+        (Join-Path $testDirectoryShell 'PortableFolderIcons.More.01.Backup'),
+        (Join-Path $testDirectoryShell 'PortableFolderIcons.Morex.01'),
+        (Join-Path $testDirectoryShell 'PortableFolderIcons.More'),
+        ($testIconChoices + '.More1'),
+        ($testIconChoices + '.More001'),
+        ($testIconChoices + '.MoreX1'),
+        ($testIconChoices + '.More01.Backup')
+    )
+    foreach ($lookalikeKey in $overflowLookalikes) {
+        [void](New-Item -Path $lookalikeKey -Force)
+        Set-ItemProperty -LiteralPath $lookalikeKey -Name 'MUIVerb' -Value 'Third-party lookalike'
+    }
+    $registerSynthetic = { param([int]$Count)
+        [void](Register-PfiContextMenu -Manifest ([pscustomobject]@{ entries = @(New-TestMenuEntries $Count) }) `
+            -InstallRoot $installRoot -RegistryRoot $testParent -SubcommandsRoot $testSubcommands `
+            -SubcommandsReference $testReference -IconChoicesRoot $testIconChoices `
+            -IconChoicesReference $testIconChoicesReference `
+            -SelectionBrokerClsidRoot $testBrokerClsid -DirectoryShellRoot $testDirectoryShell) }
+    foreach ($step in @(@(45, '01,02,03', '12|16,16,1'), @(13, '01', '12|1'), @(0, '', '0|'), @(29, '01,02', '12|16,1'))) {
+        $n = [int]$step[0]
+        & $registerSynthetic $n
+        $liveOverflow = @(Get-TestOverflowKeys $testParent $testIconChoices)
+        $liveParents = @($liveOverflow | Where-Object { $_ -like ($testParent + '.More.*') })
+        $liveStores = @($liveOverflow | Where-Object { $_ -notlike ($testParent + '.More.*') })
+        Assert-Equal ([string]$step[1]) (@($liveParents | ForEach-Object { $_.Substring($_.Length - 2) }) -join ',') `
+            ("live {0} icon(s): exactly the needed overflow entries exist and obsolete ones are pruned" -f $n)
+        Assert-Equal ([string]$step[1]) (@($liveStores | ForEach-Object { $_.Substring($_.Length - 2) }) -join ',') `
+            ("live {0} icon(s): exactly the needed overflow icon stores exist" -f $n)
+        Assert-Equal $n @(Get-TestRegisteredApplyVerbs $testParent $testIconChoices).Count `
+            ("live {0} icon(s): every icon is registered exactly once" -f $n)
+        $livePageSizes = @($liveStores | ForEach-Object { @(Get-ChildItem -LiteralPath (Join-Path $_ 'shell')).Count })
+        $liveChooserSize = @(Get-ChildItem -LiteralPath (Join-Path $testIconChoices 'shell') -ErrorAction SilentlyContinue).Count
+        Assert-Equal ([string]$step[2]) ('{0}|{1}' -f $liveChooserSize, ($livePageSizes -join ',')) `
+            ("live {0} icon(s): chooser and overflow allocation matches the plan table" -f $n)
+        Assert-Equal ((@('Utility_0100_Reset', 'Utility_0200_Repair', 'Utility_0300_Uninstall') +
+                @(if ($n -gt 0) { 'Utility_0900_Choose_Icons' })) -join ',') `
+            (@(Get-ChildItem -LiteralPath (Join-Path $testSubcommands 'shell') | Select-Object -ExpandProperty PSChildName) -join ',') `
+            ("live {0} icon(s): utilities stay first and the chooser exists only with icons" -f $n)
+        Assert-Equal 0 @($overflowLookalikes | Where-Object {
+            -not (Test-Path -LiteralPath $_) -or [string](Get-Item -LiteralPath $_).GetValue('MUIVerb') -cne 'Third-party lookalike'
+        }).Count ("live {0} icon(s): lookalike overflow names are untouched" -f $n)
+        Assert-True (Test-Path -LiteralPath $unrelated) ("live {0} icon(s): unrelated context-menu entry is untouched" -f $n)
+    }
+    $overflowState = Get-TestRegistrySnapshot (& $snapshotRoots)
+    & $registerSynthetic 29
+    Assert-Equal $overflowState (Get-TestRegistrySnapshot (& $snapshotRoots)) `
+        'repeated registration with overflow entries is idempotent (29 icons)'
 
     $legacyBlue = Join-Path $testDirectoryShell 'FolderColor_Blue'
     [void](New-Item -Path (Join-Path $legacyBlue 'command') -Force)
@@ -658,6 +889,10 @@ try {
     Assert-Equal $false (Test-Path -LiteralPath $testSubcommands) 'uninstall removes submenu storage'
     Assert-Equal $false (Test-Path -LiteralPath $testIconChoices) 'uninstall removes icon chooser storage'
     Assert-Equal $false (Test-Path -LiteralPath $testBrokerClsid) 'uninstall removes exact owned COM registration'
+    Assert-Equal 0 @(Get-TestOverflowKeys $testParent $testIconChoices).Count `
+        'uninstall removes every overflow entry and overflow icon store'
+    Assert-Equal 0 @($overflowLookalikes | Where-Object { -not (Test-Path -LiteralPath $_) }).Count `
+        'uninstall leaves lookalike overflow names untouched'
     Assert-Equal $false (Test-Path -LiteralPath $legacyBlue) 'uninstall removes recognized legacy menu'
     Assert-True (Test-Path -LiteralPath $unrelated) 'unrelated context-menu entry survives uninstall'
     Assert-True (Test-Path -LiteralPath $lookalike) 'unrecognized Color lookalike survives uninstall'
@@ -1289,6 +1524,13 @@ finally {
     }
     if ($null -ne $registryTestSubcommands -and (Test-Path -LiteralPath $registryTestSubcommands)) {
         Remove-Item -LiteralPath $registryTestSubcommands -Recurse -Force
+    }
+    if ($null -ne $registryTestReference) {
+        # Overflow stores and lookalikes are siblings named after the GUID-unique test reference.
+        foreach ($classesName in @((Get-Item -LiteralPath 'HKCU:\Software\Classes').GetSubKeyNames() |
+            Where-Object { $_.StartsWith($registryTestReference + '.', [StringComparison]::OrdinalIgnoreCase) })) {
+            Remove-Item -LiteralPath (Join-Path 'HKCU:\Software\Classes' $classesName) -Recurse -Force
+        }
     }
     if ($null -ne $registryTestBase -and (Test-Path -LiteralPath $registryTestBase)) {
         Remove-Item -LiteralPath $registryTestBase -Recurse -Force

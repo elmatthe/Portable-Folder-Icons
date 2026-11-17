@@ -37,10 +37,11 @@ rendered-resource identity.
 
 - Deterministic icon discovery, validation, labels, collision handling, and
   content-hashed caching.
-- A **Folder Icons** classic submenu with a dynamic alphabetical **Choose
-  Folder Icon** child cascade and Reset, Repair, and Uninstall in the short
-  parent. Committed HEAD remains single-selection; local multi-selection
-  development is described below.
+- A **Folder Icons** classic submenu listing Reset, Repair, and Uninstall
+  first, then a **Choose Folder Icon** child cascade with the first 12 icons
+  alphabetically. Further icons appear in additional top-level entries labelled
+  by alphabetical range, at most 16 each, because the Shell's static-menu
+  builder was observed to drop entries beyond 16 per top-level entry (ADR 015).
 - Repository-independent installed runtime and repair operation.
 - Default-silent Apply/Reset commands routed through an installed `wscript.exe`
   launcher that creates no console window, with visible errors in every mode

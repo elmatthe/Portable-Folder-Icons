@@ -154,13 +154,18 @@ try {
         $fakeHash = ('a' * 64)
         $plan = @(Get-PfiRegistryPlan -Manifest ([pscustomobject]$manifest | ConvertTo-Json -Depth 5 | ConvertFrom-Json) `
             -InstallRoot (Join-Path $FixtureRoot 'd1-install') -SelectionBrokerHash $fakeHash)
-        $choiceVerbs = @($plan | Where-Object { $_.Name -eq 'MUIVerb' -and $_.Path -like '*IconChoices\shell\*' })
+        # Phase 0B (ADR 015): Apply verbs live in the chooser store and in overflow stores (IconChoices.MoreNN), in that
+        # menu order; each top-level static tree must stay within the observed 16-entry budget.
+        $choiceVerbs = @($plan | Where-Object { $_.Name -eq 'MUIVerb' -and $_.Path -match '\\PortableFolderIcons\.ContextMenu\.IconChoices(\.More\d{2})?\\shell\\[^\\]+$' } |
+            Sort-Object @{ Expression = { $(if ($_.Path -match 'IconChoices\.More(\d{2})\\') { [int]$Matches[1] } else { 0 }) } }, @{ Expression = { Split-Path -Leaf $_.Path } })
         $keyNames = @($choiceVerbs | ForEach-Object { Split-Path -Leaf $_.Path })
         $labels = @($choiceVerbs | ForEach-Object { [string]$_.Value })
         $ordinalSorted = @($keyNames | Sort-Object -CaseSensitive)
         $labelOrderOk = $true
         for ($k = 1; $k -lt $labels.Count; $k++) { if ([string]::Compare($labels[$k - 1], $labels[$k], [StringComparison]::CurrentCultureIgnoreCase) -gt 0) { $labelOrderOk = $false } }
-        $utilities = @($plan | Where-Object { $_.Name -eq 'MUIVerb' -and $_.Path -like '*ContextMenu\shell\*' -and $_.Path -notlike '*IconChoices*' } | ForEach-Object { Split-Path -Leaf $_.Path })
+        $utilities = @($plan | Where-Object { $_.Name -eq 'MUIVerb' -and $_.Path -like '*ContextMenu\shell\*' -and $_.Path -notlike '*IconChoices*' } | ForEach-Object { Split-Path -Leaf $_.Path } | Sort-Object)
+        $treeSizes = @(@($choiceVerbs | Where-Object { $_.Path -notmatch 'IconChoices\.More\d{2}\\' }).Count + $utilities.Count) +
+            @($choiceVerbs | Where-Object { $_.Path -match 'IconChoices\.More\d{2}\\' } | Group-Object { ($_.Path -split '\\shell\\')[0] } | ForEach-Object { $_.Count })
         $dispatchOk = $true
         foreach ($verb in $choiceVerbs) {
             $hashValue = @($plan | Where-Object { $_.Path -eq $verb.Path -and $_.Name -eq 'PfiIconHash' })[0].Value
@@ -169,11 +174,12 @@ try {
             if ($entry.Count -ne 1 -or $entry[0].Hash -ne $hashValue -or -not $iconValue.EndsWith($entry[0].CachedFile + ',0')) { $dispatchOk = $false }
         }
         Assert-Gate (@($inventory | Where-Object Status -eq 'Accepted').Count -eq $count) "D1 $count synthetic icons are discovered and validated"
-        Assert-Gate ($choiceVerbs.Count -eq $count) "D1 $count icons produce $count chooser verbs (no cap)"
+        Assert-Gate ($choiceVerbs.Count -eq $count) "D1 $count icons produce $count Apply verbs across the chooser and overflow entries (none dropped)"
         Assert-Gate ((@($keyNames) -join '|') -ceq (@($ordinalSorted) -join '|')) "D1 $count verb key order equals intended label order"
-        Assert-Gate $labelOrderOk "D1 $count chooser labels are alphabetical (case-insensitive)"
-        Assert-Gate ((@($utilities) -join ',') -ceq 'Choice_0100_Icons,Utility_0100_Reset,Utility_0200_Repair,Utility_0300_Uninstall') "D1 $count utilities stay in the short parent, outside the chooser"
-        Assert-Gate $dispatchOk "D1 $count every chooser verb dispatches the hash and cached icon of its own label"
+        Assert-Gate $labelOrderOk "D1 $count icon labels are alphabetical across chooser and overflow (case-insensitive)"
+        Assert-Gate ((@($utilities) -join ',') -ceq 'Utility_0100_Reset,Utility_0200_Repair,Utility_0300_Uninstall,Utility_0900_Choose_Icons') "D1 $count Reset, Repair and Uninstall sort first in the short parent, then the chooser"
+        Assert-Gate (@($treeSizes | Where-Object { $_ -gt 16 }).Count -eq 0) "D1 $count every top-level static tree stays within the observed 16-entry budget ($($treeSizes -join ', '))"
+        Assert-Gate $dispatchOk "D1 $count every Apply verb dispatches the hash and cached icon of its own label"
         $d1 += [pscustomobject]@{ Icons = $count; ChooserVerbs = $choiceVerbs.Count; LongestLabel = (@($labels | Measure-Object -Property Length -Maximum).Maximum) }
     }
     # Label collisions are reported, not silently dropped from the menu.
@@ -187,7 +193,11 @@ try {
     $installRoot = Join-Path $env:LOCALAPPDATA 'Portable-Folder-Icons'
     $installedManifest = Read-PfiManifest (Join-Path $installRoot 'manifest.json')
     $installedAccepted = @($installedManifest.entries | Where-Object validationState -eq 'Accepted')
-    $installedVerbs = @(Get-ChildItem -LiteralPath (Join-Path $script:PfiProductionIconChoicesRoot 'shell') -ErrorAction SilentlyContinue)
+    # Read-only. Counts Apply verbs in the chooser store and any Phase 0B overflow stores, so it holds for an
+    # installation registered before or after Phase 0B.
+    $installedOverflow = @(Get-PfiOwnedOverflowRegistryPaths -RegistryRoot $script:PfiProductionRegistryRoot -IconChoicesRoot $script:PfiProductionIconChoicesRoot)
+    $installedStores = @($script:PfiProductionIconChoicesRoot) + @($installedOverflow | Where-Object { $_ -notlike ($script:PfiProductionRegistryRoot + '.More.*') })
+    $installedVerbs = @($installedStores | ForEach-Object { Get-ChildItem -LiteralPath (Join-Path $_ 'shell') -ErrorAction SilentlyContinue })
     $stale = @()
     foreach ($verb in $installedVerbs) {
         $hashValue = [string]$verb.GetValue('PfiIconHash'); $iconValue = [string]$verb.GetValue('Icon'); $label = [string]$verb.GetValue('MUIVerb')
@@ -197,14 +207,21 @@ try {
         $delegate = ''; if ($command) { $delegate = [string]$command.GetValue('DelegateExecute') }
         if ($entry.Count -ne 1 -or -not (Test-Path -LiteralPath $iconFile) -or (Get-PfiSha256 $iconFile) -ne $hashValue -or $delegate -ne $script:PfiSelectionBrokerClsid) { $stale += $verb.PSChildName }
     }
-    Assert-Gate ($installedVerbs.Count -eq $installedAccepted.Count) ("D1 installed chooser has one verb per accepted manifest icon ({0} verbs, {1} accepted)" -f $installedVerbs.Count, $installedAccepted.Count)
-    Assert-Gate ($stale.Count -eq 0) 'D1 installed chooser has no stale, duplicate, unhashed or unregistered entries' ($stale -join ', ')
+    Assert-Gate ($installedVerbs.Count -eq $installedAccepted.Count) ("D1 installed menu has one Apply verb per accepted manifest icon ({0} verbs, {1} accepted)" -f $installedVerbs.Count, $installedAccepted.Count)
+    Assert-Gate ($stale.Count -eq 0) 'D1 installed menu has no stale, duplicate, unhashed or unregistered entries' ($stale -join ', ')
     Add-Type -AssemblyName System.Windows.Forms
     $work = [Windows.Forms.SystemInformation]::WorkingArea; $menuHeight = [Windows.Forms.SystemInformation]::MenuHeight
     $itemHeight = [Math]::Max($menuHeight, [Windows.Forms.SystemInformation]::SmallIconSize.Height + 8)
     $estimate = [Math]::Floor($work.Height / $itemHeight)
-    Add-Finding 'D1' 'WINDOWS SHELL/CACHE BEHAVIOR' ("Classic Win32 popup menus that exceed the screen are scrolled only by their arrow buttons or keyboard, not the mouse wheel. Estimated capacity on this display: about {0} rows (work area {1}px / ~{2}px per row; estimate, not a measurement). Installed chooser has {3} icon rows in ONE cascade." -f $estimate, $work.Height, $itemHeight, $installedVerbs.Count)
-    Add-Finding 'D1' 'SOURCE DEFECT (design)' 'The registry plan places every accepted icon in a single Choose Folder Icon cascade with no grouping or paging; nothing bounds the cascade height as personal imports grow.'
+    Add-Finding 'D1' 'WINDOWS SHELL/CACHE BEHAVIOR' ("Classic Win32 popup menus that exceed the screen are scrolled only by their arrow buttons or keyboard, not the mouse wheel. Estimated capacity on this display: about {0} rows (work area {1}px / ~{2}px per row; estimate, not a measurement). Since Phase 0B no generated cascade holds more than 16 entries." -f $estimate, $work.Height, $itemHeight)
+    $installedOldLayout = Test-Path -LiteralPath (Join-Path $script:PfiProductionSubcommandsRoot 'shell\Choice_0100_Icons')
+    $installedParents = @($installedOverflow | Where-Object { $_ -like ($script:PfiProductionRegistryRoot + '.More.*') })
+    if ($installedOldLayout) {
+        Add-Finding 'D1/D5' 'INSTALLATION/REGISTRATION DEFECT' ("The installed menu predates Phase 0B: one chooser cascade with {0} icons and the utilities sorted after it, which the Shell truncates at 16 entries (M01 FAIL). Rerunning Setup_and_Run-Portable-Folder-Icons.bat registers the budgeted layout; manual M01 confirms it." -f $installedVerbs.Count)
+    }
+    else {
+        Add-Finding 'D1/D5' 'UNVERIFIED (manual M01)' ("The installed menu uses the Phase 0B layout: {0} Apply verb(s), {1} overflow entr(y/ies). Gate check c-0009 proves the Shell-built menu for this layout; Explorer rendering needs manual M01." -f $installedVerbs.Count, $installedParents.Count)
+    }
     $sections['D1-installed'] = [pscustomobject]@{ InstalledVerbs = $installedVerbs.Count; ManifestAccepted = $installedAccepted.Count; EstimatedRows = $estimate; WorkAreaHeight = $work.Height; MenuHeight = $menuHeight }
 
     # ---------------------------------------------------------------- D2 Reset to Default
@@ -358,13 +375,20 @@ for (`$i = 0; `$i -lt 2; `$i++) {
             $raceErrors += @(Get-Content -LiteralPath (Join-Path $FixtureRoot "d3-race-$p.out.txt") | Where-Object { $_ -like 'RACE-ERROR:*' })
             $raceErrors += @(Get-Content -LiteralPath (Join-Path $FixtureRoot "d3-race-$p.err.txt") | Where-Object { $_.Trim() } | Select-Object -First 2)
         }
-        $finalVerbs = @(Get-ChildItem -LiteralPath (Join-Path $regChoices 'shell') -ErrorAction SilentlyContinue).Count
+        # Phase 0B: Apply verbs beyond the chooser allotment live in overflow stores ('<chooser store>.MoreNN').
+        $finalStores = @($regChoices) + @(Get-PfiOwnedOverflowRegistryPaths -RegistryRoot $regParent -IconChoicesRoot $regChoices |
+            Where-Object { $_ -notlike "$regParent.More.*" })
+        $finalVerbs = @($finalStores | ForEach-Object { Get-ChildItem -LiteralPath (Join-Path $_ 'shell') -ErrorAction SilentlyContinue }).Count
         $finalOwned = Test-Path -LiteralPath (Join-Path $regClsid 'LocalServer32')
     }
     finally {
-        foreach ($key in @($regClsid, $regChoices, $regSub, $regBase)) { if (Test-Path -LiteralPath $key) { Remove-Item -LiteralPath $key -Recurse -Force } }
+        # Every Classes key of this run starts with its GUID-unique reference (submenu, chooser and overflow stores).
+        $runClassKeys = @((Get-Item -LiteralPath 'HKCU:\Software\Classes').GetSubKeyNames() |
+            Where-Object { $_.StartsWith($reference, [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { "HKCU:\Software\Classes\$_" })
+        foreach ($key in @($regClsid) + $runClassKeys + @($regBase)) { if (Test-Path -LiteralPath $key) { Remove-Item -LiteralPath $key -Recurse -Force } }
     }
-    Assert-Gate (-not (Test-Path -LiteralPath $regBase) -and -not (Test-Path -LiteralPath $regClsid)) 'D3 isolated race registry roots are removed'
+    $leftClassKeys = @((Get-Item -LiteralPath 'HKCU:\Software\Classes').GetSubKeyNames() | Where-Object { $_.StartsWith($reference, [StringComparison]::OrdinalIgnoreCase) })
+    Assert-Gate (-not (Test-Path -LiteralPath $regBase) -and -not (Test-Path -LiteralPath $regClsid) -and $leftClassKeys.Count -eq 0) 'D3 isolated race registry roots, including overflow stores, are removed' ($leftClassKeys -join ', ')
     $distinct = @($raceErrors | ForEach-Object { ($_ -replace '^RACE-ERROR: ', '') } | Sort-Object -Unique)
     Add-Finding 'D3' $(if ($raceErrors.Count -gt 0) { 'SOURCE DEFECT (concurrency, isolated reproduction)' } else { 'UNVERIFIED' }) ("4 concurrent processes x 2 re-registrations against isolated roots produced {0} error(s); final chooser verbs {1}/{2}, COM LocalServer32 present={3}. Distinct: {4}. Whether Explorer starts one Repair process per selected folder (static verb, MultiSelectModel=Player) is a manual check." -f $raceErrors.Count, $finalVerbs, $accepted.Count, $finalOwned, (($distinct | Select-Object -First 3) -join ' || '))
     $sections['D3'] = [pscustomobject]@{ Scenarios = $d3; RaceErrors = $raceErrors.Count; RaceDistinct = $distinct; FinalVerbs = $finalVerbs; FinalComOwned = $finalOwned }

@@ -9,6 +9,15 @@ $script:PfiProductionDirectoryShellRoot = 'HKCU:\Software\Classes\Directory\shel
 $script:PfiProductionSelectionBrokerClsidRoot = 'HKCU:\Software\Classes\CLSID\' + $script:PfiSelectionBrokerClsid
 $script:PfiSelectionBrokerOwner = 'Portable-Folder-Icons.SelectionBroker'
 $script:PfiResetVerbName = 'Utility_0100_Reset'
+# Phase 0B (ADR 015). OBSERVED COMPATIBILITY CONSTRAINT, not documented Windows behaviour: on the measured Windows 11
+# build the Shell's static-menu builder showed at most this many entries per top-level static menu entry, counted
+# depth-first across nested ExtendedSubCommandsKey submenus, and silently dropped the rest. Gate check c-0009
+# re-measures it. Lower this one value for headroom; every allotment below is derived from it.
+$script:PfiStaticMenuEntryBudget = 16
+# Sorts after Utility_0100..0300, so Reset, Repair and Uninstall come first and can never be displaced by icons.
+$script:PfiChooserVerbName = 'Utility_0900_Choose_Icons'
+$script:PfiMaxOverflowMenus = 99
+$script:PfiRangeLabelEndLength = 40
 $script:PfiLegacyColorNames = @(
     'Black', 'Blue', 'Gray', 'Green', 'Orange',
     'Pink', 'Purple', 'Red', 'Teal', 'Yellow'
@@ -125,6 +134,102 @@ function New-PfiRegistryValue {
     }
 }
 
+function Get-PfiOrderedMenuEntries {
+    # Accepted icons in menu order: case-insensitive invariant-culture label order with an ordinal tie-break, so the
+    # order, the Apply command numbering and the overflow boundaries depend on neither the manifest order nor the
+    # machine's culture. (Labels are unique ignoring case; setup rejects collisions.)
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Manifest)
+
+    $entries = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in @($Manifest.entries | Where-Object validationState -eq 'Accepted')) {
+        if ([string]::IsNullOrWhiteSpace([string]$entry.menuLabel) -or
+            ([string]$entry.hash -notmatch '^[a-fA-F0-9]{64}$')) {
+            throw 'Manifest contains an invalid accepted menu entry.'
+        }
+        $entries.Add($entry)
+    }
+    $entries.Sort([Comparison[object]] {
+        param($left, $right)
+        $order = [string]::Compare([string]$left.menuLabel, [string]$right.menuLabel,
+            [StringComparison]::InvariantCultureIgnoreCase)
+        if ($order -eq 0) { $order = [string]::CompareOrdinal([string]$left.menuLabel, [string]$right.menuLabel) }
+        if ($order -eq 0) { $order = [string]::CompareOrdinal([string]$left.hash, [string]$right.hash) }
+        return $order
+    })
+    return $entries.ToArray()
+}
+
+function Get-PfiOverflowMenuLabel {
+    # 'Folder Icons (First<en dash>Last)', or 'Folder Icons (Only)' for one icon. Each end longer than the limit keeps
+    # its first characters and gains an ellipsis. Non-ASCII characters are built from code points because Windows
+    # PowerShell 5.1 reads this BOM-less script as ANSI.
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string[]]$Labels)
+
+    $ends = @(foreach ($label in @($Labels[0], $Labels[$Labels.Count - 1])) {
+        if ($label.Length -le $script:PfiRangeLabelEndLength) { $label; continue }
+        $cut = $script:PfiRangeLabelEndLength - 1
+        if ([char]::IsHighSurrogate($label[$cut - 1])) { $cut-- }
+        $label.Substring(0, $cut).TrimEnd() + [char]0x2026
+    })
+    if ($Labels.Count -eq 1) { return ('Folder Icons ({0})' -f $ends[0]) }
+    return ('Folder Icons ({0}{1}{2})' -f $ends[0], [char]0x2013, $ends[1])
+}
+
+function Get-PfiMenuLayout {
+    # Primary chooser: a reserved allotment of the budget minus Reset, Repair, Uninstall and the chooser itself, so
+    # the utilities never compete with icons. Remaining icons: top-level overflow entries of at most one budget each.
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Manifest)
+
+    $ordered = @(Get-PfiOrderedMenuEntries -Manifest $Manifest)
+    $primaryAllotment = $script:PfiStaticMenuEntryBudget - 4
+    $overflowCapacity = $script:PfiStaticMenuEntryBudget
+    $primaryCount = [Math]::Min($ordered.Count, $primaryAllotment)
+    $overflowCount = [int][Math]::Ceiling(($ordered.Count - $primaryCount) / $overflowCapacity)
+    if ($overflowCount -gt $script:PfiMaxOverflowMenus) {
+        throw ('{0} icons were accepted, but the classic context menu can show at most {1}. Remove some ICO files, then rerun Setup_and_Run-Portable-Folder-Icons.bat.' -f
+            $ordered.Count, ($primaryAllotment + $script:PfiMaxOverflowMenus * $overflowCapacity))
+    }
+    $overflow = @()
+    for ($number = 1; $number -le $overflowCount; $number++) {
+        $start = $primaryCount + ($number - 1) * $overflowCapacity
+        $end = [Math]::Min($start + $overflowCapacity, $ordered.Count) - 1
+        $pageEntries = @($ordered[$start..$end])
+        $overflow += [pscustomobject]@{
+            Number = $number
+            Label = Get-PfiOverflowMenuLabel -Labels @($pageEntries | ForEach-Object { [string]$_.menuLabel })
+            Entries = $pageEntries
+        }
+    }
+    return [pscustomobject]@{
+        Primary = @($(if ($primaryCount -gt 0) { $ordered[0..($primaryCount - 1)] }))
+        Overflow = $overflow
+    }
+}
+
+function Get-PfiOwnedOverflowRegistryPaths {
+    # The overflow keys this product owns: exact siblings '<parent>.More.NN' and '<chooser store>.MoreNN' with
+    # NN = 01..99. Any other name, including near lookalikes, is never returned and therefore never removed.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$RegistryRoot,
+        [Parameter(Mandatory = $true)][string]$IconChoicesRoot
+    )
+
+    $owned = New-Object System.Collections.Generic.List[string]
+    foreach ($pair in @(@($RegistryRoot, '.More.'), @($IconChoicesRoot, '.More'))) {
+        $container = Split-Path -Parent $pair[0]
+        if (-not (Test-Path -LiteralPath $container)) { continue }
+        $pattern = '^' + [regex]::Escape((Split-Path -Leaf $pair[0]) + $pair[1]) + '(0[1-9]|[1-9][0-9])$'
+        foreach ($name in @((Get-Item -LiteralPath $container).GetSubKeyNames() | Sort-Object)) {
+            if ($name -match $pattern) { $owned.Add((Join-Path $container $name)) }
+        }
+    }
+    return $owned.ToArray()
+}
+
 function Get-PfiRegistryPlan {
     [CmdletBinding()]
     param(
@@ -180,36 +285,50 @@ function Get-PfiRegistryPlan {
     $plan.Add((New-PfiRegistryValue $RegistryRoot 'Icon' 'shell32.dll,3'))
     $plan.Add((New-PfiRegistryValue $RegistryRoot 'ExtendedSubCommandsKey' $SubcommandsReference))
 
-    $accepted = @($Manifest.entries |
-        Where-Object validationState -eq 'Accepted' |
-        Sort-Object @{ Expression = { $_.menuLabel }; Ascending = $true })
-    if ($accepted.Count -gt 0) {
-        $chooserPath = Join-Path $subcommandsShell 'Choice_0100_Icons'
+    # Phase 0B (ADR 015): Reset, Repair and Uninstall first, then the chooser with a reserved allotment of icons; the
+    # remaining icons go to top-level overflow entries, each its own static tree within the entry budget.
+    $layout = Get-PfiMenuLayout -Manifest $Manifest
+    $iconStores = New-Object System.Collections.Generic.List[object]
+    if ($layout.Primary.Count -gt 0) {
+        $chooserPath = Join-Path $subcommandsShell $script:PfiChooserVerbName
         $plan.Add((New-PfiRegistryValue $chooserPath 'MUIVerb' 'Choose Folder Icon'))
         $plan.Add((New-PfiRegistryValue $chooserPath 'Icon' 'shell32.dll,3'))
         $plan.Add((New-PfiRegistryValue $chooserPath 'ExtendedSubCommandsKey' $IconChoicesReference))
+        # ECF_SEPARATORBEFORE: divides the utilities from the chooser (it previously sat on Reset).
+        $plan.Add((New-PfiRegistryValue $chooserPath 'CommandFlags' 32 'DWord'))
+        $iconStores.Add([pscustomobject]@{ Shell = $iconChoicesShell; Entries = $layout.Primary })
     }
+    foreach ($page in @($layout.Overflow)) {
+        $overflowParent = '{0}.More.{1:D2}' -f $RegistryRoot, $page.Number
+        $plan.Add((New-PfiRegistryValue $overflowParent 'MUIVerb' ([string]$page.Label)))
+        $plan.Add((New-PfiRegistryValue $overflowParent 'MultiSelectModel' 'Player'))
+        $plan.Add((New-PfiRegistryValue $overflowParent 'Icon' 'shell32.dll,3'))
+        $plan.Add((New-PfiRegistryValue $overflowParent 'ExtendedSubCommandsKey' (
+            '{0}.More{1:D2}' -f $IconChoicesReference, $page.Number)))
+        $iconStores.Add([pscustomobject]@{
+            Shell = Join-Path ('{0}.More{1:D2}' -f $IconChoicesRoot, $page.Number) 'shell'
+            Entries = $page.Entries
+        })
+    }
+    # Apply command identities keep one ordinal sequence in menu order, wherever a verb is stored.
     $ordinal = 0
-    foreach ($entry in $accepted) {
-        if ([string]::IsNullOrWhiteSpace([string]$entry.menuLabel) -or
-            ([string]$entry.hash -notmatch '^[a-fA-F0-9]{64}$')) {
-            throw 'Manifest contains an invalid accepted menu entry.'
+    foreach ($store in $iconStores) {
+        foreach ($entry in @($store.Entries)) {
+            $ordinal++
+            $verbName = 'PortableFolderIcons.Apply.{0:D4}' -f $ordinal
+            $verbPath = Join-Path $store.Shell $verbName
+            $cachedIcon = Join-Path (Join-Path $InstallRoot 'icons') ([string]$entry.cachedFilename)
+            $plan.Add((New-PfiRegistryValue $verbPath 'MUIVerb' ([string]$entry.menuLabel)))
+            $plan.Add((New-PfiRegistryValue $verbPath 'Icon' ($cachedIcon + ',0')))
+            $plan.Add((New-PfiRegistryValue $verbPath 'MultiSelectModel' 'Player'))
+            $plan.Add((New-PfiRegistryValue $verbPath 'PfiAction' 'Apply'))
+            $plan.Add((New-PfiRegistryValue $verbPath 'PfiIconHash' ([string]$entry.hash).ToLowerInvariant()))
+            $plan.Add((New-PfiRegistryValue (Join-Path $verbPath 'command') 'DelegateExecute' $script:PfiSelectionBrokerClsid))
         }
-        $ordinal++
-        $verbName = 'PortableFolderIcons.Apply.{0:D4}' -f $ordinal
-        $verbPath = Join-Path $iconChoicesShell $verbName
-        $cachedIcon = Join-Path (Join-Path $InstallRoot 'icons') ([string]$entry.cachedFilename)
-        $plan.Add((New-PfiRegistryValue $verbPath 'MUIVerb' ([string]$entry.menuLabel)))
-        $plan.Add((New-PfiRegistryValue $verbPath 'Icon' ($cachedIcon + ',0')))
-        $plan.Add((New-PfiRegistryValue $verbPath 'MultiSelectModel' 'Player'))
-        $plan.Add((New-PfiRegistryValue $verbPath 'PfiAction' 'Apply'))
-        $plan.Add((New-PfiRegistryValue $verbPath 'PfiIconHash' ([string]$entry.hash).ToLowerInvariant()))
-        $plan.Add((New-PfiRegistryValue (Join-Path $verbPath 'command') 'DelegateExecute' $script:PfiSelectionBrokerClsid))
     }
 
     $resetPath = Join-Path $subcommandsShell $script:PfiResetVerbName
     $plan.Add((New-PfiRegistryValue $resetPath 'MUIVerb' 'Reset to Default'))
-    $plan.Add((New-PfiRegistryValue $resetPath 'CommandFlags' 32 'DWord'))
     $plan.Add((New-PfiRegistryValue $resetPath 'MultiSelectModel' 'Player'))
     $plan.Add((New-PfiRegistryValue $resetPath 'PfiAction' 'Reset'))
     $plan.Add((New-PfiRegistryValue (Join-Path $resetPath 'command') 'DelegateExecute' $script:PfiSelectionBrokerClsid))
@@ -378,6 +497,11 @@ function Register-PfiContextMenu {
     if (Test-Path -LiteralPath $SelectionBrokerClsidRoot) {
         Remove-Item -LiteralPath $SelectionBrokerClsidRoot -Recurse -Force
     }
+    # Reconcile overflow entries: remove every owned one, then the plan recreates exactly those the inventory needs,
+    # so a smaller inventory leaves no obsolete entry behind.
+    foreach ($overflowKey in @(Get-PfiOwnedOverflowRegistryPaths -RegistryRoot $RegistryRoot -IconChoicesRoot $IconChoicesRoot)) {
+        Remove-Item -LiteralPath $overflowKey -Recurse -Force
+    }
     foreach ($item in $plan) {
         if (-not (Test-Path -LiteralPath $item.Path)) {
             [void](New-Item -Path $item.Path -Force)
@@ -413,7 +537,8 @@ function Remove-PfiContextMenu {
     if (-not (Test-PfiSelectionBrokerRegistryOwnership $SelectionBrokerClsidRoot $InstallRoot)) {
         throw 'Refusing to remove a COM registration that is not exactly owned by Portable Folder Icons.'
     }
-    foreach ($ownedRoot in @($RegistryRoot, $SubcommandsRoot, $IconChoicesRoot, $SelectionBrokerClsidRoot)) {
+    $overflowKeys = @(Get-PfiOwnedOverflowRegistryPaths -RegistryRoot $RegistryRoot -IconChoicesRoot $IconChoicesRoot)
+    foreach ($ownedRoot in @($RegistryRoot, $SubcommandsRoot, $IconChoicesRoot, $SelectionBrokerClsidRoot) + $overflowKeys) {
         if ($PSCmdlet.ShouldProcess($ownedRoot, 'Remove Portable Folder Icons context menu') -and
             (Test-Path -LiteralPath $ownedRoot)) {
             Remove-Item -LiteralPath $ownedRoot -Recurse -Force

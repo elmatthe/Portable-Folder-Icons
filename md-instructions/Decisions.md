@@ -5,6 +5,31 @@ entries appear first.
 
 ---
 
+## 018 — Tracked root CLAUDE.md adapter that imports AGENTS.md — 2026-11-16 — Claude
+
+**Status:** Accepted (user requirement: Claude Code instruction portability)
+**Context:** The only Claude Code instruction file was the gitignored `.claude/CLAUDE.md` (Open Issue 20). Claude Code
+documentation (code.claude.com, "Memory", via Context7 on 2026-11-16): relative `@` imports resolve against the file
+that contains them, so its `@AGENTS.md` pointed at a non-existent `.claude/AGENTS.md`; when any `CLAUDE.md` exists,
+Claude Code reads the `CLAUDE.md` files instead of `AGENTS.md`; project files may sit at `./CLAUDE.md` or
+`./.claude/CLAUDE.md` and all discovered files are concatenated. A fresh checkout had no Claude adapter at all, and
+this checkout's sessions did not receive `AGENTS.md` automatically.
+**Decision:** Track a minimal root `CLAUDE.md` whose only import is `@AGENTS.md` (always present), with three short
+notes: the import must stay at the root, `AI-WORKSPACE.md` and `.claude/` are local, and project rules never live in
+local files. It does not import the gitignored `AI-WORKSPACE.md` (absent in a fresh checkout; the documentation found
+does not state how a missing import target is handled); `AGENTS.md` Start Here already tells agents to open it. The
+local `.claude/CLAUDE.md` is left untouched. `scripts/verify.ps1` (gate `c-0006`) requires the file, allows it in the
+root layout, and checks that it stays unignored and keeps the `@AGENTS.md` line.
+**Alternatives considered:** Fixing the local file to `@../AGENTS.md` (still untracked, so fresh checkouts gain
+nothing); force-adding `.claude/` (machine-local settings and a 37 KB permission file); copying the rules into
+`CLAUDE.md` (two sources of truth).
+**Consequences:** Fresh checkouts load `AGENTS.md`, including the housekeeping rule, through the tracked adapter. In
+this checkout both `CLAUDE.md` files load; the local one's imports still resolve under `.claude/` and add nothing.
+Verified statically (file, import line, not ignored, docs); an interactive `/context all` check of a new session is
+the remaining confirmation. Supersedes the "local pointer" consequence of ADR 017.
+**Follow-up — 2026-11-17:** the next fresh Claude Code session in this checkout loaded both the root `CLAUDE.md` and
+`AGENTS.md` as project instructions at startup, without any manual read (the local `.claude/CLAUDE.md` is unchanged).
+
 ## 017 — Continuous development-artifact housekeeping — 2026-11-16 — Claude
 
 **Status:** Accepted (user requirement; permanent for every phase)
@@ -23,6 +48,7 @@ tooling (more machinery than needed); deleting `outputs/` wholesale (would destr
 manual results).
 **Consequences:** Run evidence is short-lived, so results must reach Handoff, the plan or tests before cleanup.
 `.claude/CLAUDE.md` is gitignored, so its pointer to the rule is local; the tracked `AGENTS.md` is the durable copy.
+(Follow-up 2026-11-16: the tracked root `CLAUDE.md` now imports `AGENTS.md` for Claude Code; see ADR 018.)
 
 ## 016 — Active plan in md-instructions; superseded plans archived in files/plans/legacy-plan — 2026-11-16 — Claude
 
@@ -39,7 +65,8 @@ deleting the v0.1.1 plan (loses the history it records outside Git log).
 
 ## 015 — Phase 0B: budgeted static menu with alphabetic-range overflow entries — 2026-11-16 — Claude
 
-**Status:** Accepted design (user-approved); not implemented
+**Status:** Accepted design (user-approved); implemented 2026-11-16 on `feature/v0.2.0`, automated PASS, manual M01
+PASS (user, 2026-11-16). Working fallback: the user prefers a single top-level entry as the final design.
 **Context:** Manual M01 failed: Explorer showed Choose Folder Icon plus 15 icons and no Reset/Repair/Uninstall. An
 isolated probe of the Shell's static-menu builder on this machine (Windows 11 build 26200.9725) rendered at most 16
 entries per top-level static menu entry, counted depth-first across nested `ExtendedSubCommandsKey` submenus in key
@@ -58,6 +85,23 @@ for Phase 0B); relying on menu scrolling (entries are dropped, not scrolled).
 **Consequences:** Large inventories add one top-level classic-menu entry per further 16 icons (120 icons: 8 entries);
 this clutter is an accepted trade-off. The budget is one constant, re-measured by the Shell-builder check on each
 Windows build where acceptance is claimed. Supersedes ADR 011 only for the layout of the icon list.
+
+**Follow-up — implementation, 2026-11-16 (Phase 0B):** only `scripts/Windows/PortableFolderIcons.Integration.ps1`
+changed in the product. `$script:PfiStaticMenuEntryBudget = 16` is the one constant; chooser allotment = budget − 4,
+overflow capacity = budget. The chooser key is `Utility_0900_Choose_Icons` (sorts after `Utility_0100_Reset`,
+`_0200_Repair`, `_0300_Uninstall`, whose names, commands and broker contract are unchanged); the separator flag
+(`CommandFlags` 32) moved from Reset, now first, to the chooser. Menu order is case-insensitive invariant-culture with
+an ordinal tie-break, independent of manifest order and machine culture (identical to the previous `Sort-Object`
+order for every current label). Apply keys keep one `PortableFolderIcons.Apply.NNNN` sequence in menu order across all
+stores, with unchanged `PfiAction`, `PfiIconHash`, `MultiSelectModel=Player` and `DelegateExecute`, so the broker and
+its registration-derived contracts are unchanged (broker binaries untouched; no rebuild). Overflow entries are
+`<parent>.More.NN` → `<chooser store>.MoreNN`, NN 01–99, labelled `Folder Icons (First–Last)` (en dash; one icon:
+`Folder Icons (Name)`; each end over 40 characters is shortened to 39 plus an ellipsis). Ownership is by exact name:
+registration removes every owned overflow key and recreates the needed ones, Uninstall removes them all, near
+lookalikes are never touched. More than 12 + 99 × 16 = 1596 icons makes registration fail with a Setup_and_Run
+message instead of dropping any. The Shell builder re-measured the budget at 16 of 40 (`c-0009`). Runtime and
+assembly versions were not advanced: the plan's coordinated version step needs a broker rebuild, which this phase
+excludes (plan, "Branch, version and checkpoint policy").
 
 ## 014 — Build the native test harness once per input set; classify every launch — 2026-11-16 — Claude
 

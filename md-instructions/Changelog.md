@@ -2,6 +2,22 @@
 
 ## v0.1.1 — Unreleased
 
+### Phase 0B: accessible folder icon menus — 2026-11-16 (`feature/v0.2.0`; version metadata still 0.1.1)
+
+- **Folder Icons** lists Reset to Default, Repair Portable Folder Icons and
+  Uninstall Portable Folder Icons first, then **Choose Folder Icon** with the
+  first 12 icons alphabetically. With more than 12 icons installed these
+  commands had disappeared, because the Windows Shell showed at most 16 entries
+  per top-level static menu entry and silently dropped the rest.
+- Icons beyond the first 12 appear in additional top-level entries labelled by
+  alphabetical range, for example **Folder Icons (Purple–Yellow)**, at most 16
+  icons each. Setup and Repair add or remove these entries as the icon
+  collection changes; Uninstall removes them. No icon is hidden: setup stops
+  with an explanation if more than 1,596 icons are accepted.
+- Manual Explorer acceptance (M01) passed on Windows 11 on 2026-11-16. This
+  two-entry layout is the working fallback; a single-entry menu remains the
+  preferred design and is under investigation.
+
 ### Phase 2 automated checkpoint — 2026-10-01
 
 - Aligned broker initialization with the existing registered Reset key

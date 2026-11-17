@@ -238,6 +238,7 @@ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File files\dev-work\v
 | `c-0006` | yes | `scripts/verify.ps1`: suite again, required files, root layout, parsing, every ICO, docs (including the AGENTS.md housekeeping rules), security scan, `git diff --check` | Called with no native flag, like `c-0001`. `[FAIL]` lines labelled BASELINE (`known-baseline.tsv`) or NEW. No BASELINE rows remain (B-001/B-002 retired 2026-11-16) |
 | `c-0007` | yes | Native verification infrastructure (`tests/Test-NativeHarnessInfrastructure.ps1`): outcome classification, real process capture, `c-0002`/`c-0004` wrappers end to end with stub runners, harness build cache in a disposable root, blocked-binary launch guard, default launch authorization of every entrypoint | Launches no compiled harness; only `csc.exe` and inbox `powershell.exe` run |
 | `c-0008` | yes | Output housekeeping safeguards (`tests/Test-GateOutputHousekeeping.ps1`) for `helpers/Remove-GateOutputs.ps1` | Uses a disposable fake outputs tree; its dry run against the real `outputs/` must delete nothing |
+| `c-0009` | yes | Shell-built static menu (`tests/Test-PfiStaticCascadeMenu.ps1`, Phase 0B): re-measures the static-menu entry budget, then registers the product menu through `Register-PfiContextMenu` at 0, 1, 12, 13, 16, 21, 28, 29, 45, 120, 45, 13, 0, 29, 29 icons and asserts what `SHCreateDefaultContextMenu` exposes: utilities first and always present, every icon exactly once, alphabetical ranges, each top-level tree within the budget, no stale overflow entry after shrinking, unrelated and lookalike verbs untouched, idempotent repeat | GUID-named HKCU test keys only; every command is neutralized (and that is asserted) before the Shell sees it; launches nothing; proves the Shell builder's output on this machine, not Explorer pixels (M01) |
 
 Opt-ins are environment variables, set deliberately for one run and never by default:
 
@@ -330,10 +331,22 @@ checkpoint; its facts are in "Security review evidence" above.)
   "Distribution" does not hold here: `git archive` and GitHub ZIP downloads include every tracked file, including this
   gate. The application does not need it at runtime.
 
-### Shell menu-builder probe (diagnostic, not yet a gate check)
+### Shell menu-builder check `c-0009` (Phase 0B, 2026-11-16)
 
-`tests/Test-PfiStaticCascadeMenu.ps1 -OutputRoot <dir> -FixtureRoot <dir>` writes the product's registry plan (or a
-candidate layout) under GUID-named HKCU test keys, replaces `DelegateExecute` with an unregistered CLSID and
-commands with a non-existent path, builds the menu with `SHCreateDefaultContextMenu` from those keys only, prints
-the resulting menu tree and deletes the keys. It launches nothing and loads no third-party shell extension. It
-proves what the Shell's static-menu builder produces, not pixels. Phase 0B turns it into a required check.
+`tests/Test-PfiStaticCascadeMenu.ps1` (gate check `c-0009`; direct use: `-OutputRoot <dir> -FixtureRoot <dir>` inside
+`files\`) replaced the Phase 0 diagnostic probe of the same name. It builds a minimal fixture install (a copy of the
+broker that is only hashed and read as metadata, never executed), then:
+
+1. **Budget re-measurement.** One raw static cascade with 40 entries; the number the Shell renders is the measured
+   budget. PASS needs it to be at least the product's `PfiStaticMenuEntryBudget`. A negative control proves the
+   comparison detects the dropped entries. Measured on 2026-11-16 (Windows 11 build 26200.9725): **16 of 40**, the
+   same value Phase 0 recorded.
+2. **Product menu through expansion and shrinkage.** `Register-PfiContextMenu` writes the real registration at each
+   size of the sequence above into GUID-named test roots, with an unrelated verb and an overflow-name lookalike beside
+   it. Every `DelegateExecute` and static command is then neutralized and the check refuses to build a menu if any
+   live command remains. Expected menus are computed independently from the specification (sorted labels, reserved
+   chooser allotment, range labels), not from product code.
+3. **Cleanup.** Every test key is removed in `finally`, and a leftover key is a FAIL.
+
+It proves what the Shell's static-verb builder produces on this machine. It does not prove Explorer pixels, scrolling,
+or the flags Explorer itself passes to the builder; that is manual gate M01.

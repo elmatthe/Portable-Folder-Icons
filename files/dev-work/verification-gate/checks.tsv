@@ -34,3 +34,7 @@ c-0007	yes	600	windows	native	powershell.exe	-NoLogo	-NoProfile	-ExecutionPolicy
 # c-0008 housekeeping helper safeguards (helpers/Remove-GateOutputs.ps1) on a disposable fake outputs tree; a dry run
 # against the real outputs folder must delete nothing.
 c-0008	yes	300	windows	native	powershell.exe	-NoLogo	-NoProfile	-ExecutionPolicy	Bypass	-File	files/dev-work/verification-gate/tests/Test-GateOutputHousekeeping.ps1
+# c-0009 Shell-built static menu (Phase 0B): registers the product menu under GUID-named HKCU test keys through Register-PfiContextMenu,
+# neutralizes every command (unregistered CLSID, non-existent path), builds the menu with SHCreateDefaultContextMenu from those keys only
+# and asserts what the Shell exposes at each inventory size, through expansion and shrinkage. Re-measures the entry budget. Launches nothing.
+c-0009	yes	900	windows	native	powershell.exe	-NoLogo	-NoProfile	-ExecutionPolicy	Bypass	-File	files/dev-work/verification-gate/tests/Test-PfiStaticCascadeMenu.ps1

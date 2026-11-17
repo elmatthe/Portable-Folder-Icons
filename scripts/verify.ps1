@@ -69,6 +69,7 @@ $required = @(
     'md-instructions\Decisions.md',
     'md-instructions\Handoff.md',
     'AGENTS.md',
+    'CLAUDE.md',
     'scripts\verify.ps1'
     'scripts\Windows\Cleanup-PortableFolderIcons.ps1'
     'scripts\Windows\Install-PortableFolderIcons.ps1'
@@ -190,7 +191,7 @@ else {
 $allowedRootNames = @(
     '.agents', '.ai', '.claude', '.codex', '.git', '.vscode',
     'files', 'md-instructions', 'scripts',
-    '.gitattributes', '.gitignore', 'AGENTS.md', 'AI-WORKSPACE.md', 'LICENSE', 'README.md',
+    '.gitattributes', '.gitignore', 'AGENTS.md', 'AI-WORKSPACE.md', 'CLAUDE.md', 'LICENSE', 'README.md',
     'config.toml', 'Map-Repo-Structure.bat',
     'Setup_and_Run-Portable-Folder-Icons.bat',
     'Setup_and_Run-Portable-Folder-Icons.command'
@@ -296,6 +297,23 @@ if ($agentsText -match '(?m)^### Repository development artifact housekeeping' -
 }
 else {
     Add-CheckFailure 'AGENTS.md must document development-artifact housekeeping (outputs retention, RETAIN.md, Remove-GateOutputs.ps1)'
+}
+
+# Claude Code reads a CLAUDE.md instead of AGENTS.md whenever one exists, and resolves @imports relative to the
+# importing file, so the tracked adapter must sit at the root, import AGENTS.md there, and stay unignored.
+$claudePath = Join-Path $repoRoot 'CLAUDE.md'
+$claudeText = if (Test-Path -LiteralPath $claudePath -PathType Leaf) { Get-Content -LiteralPath $claudePath -Raw } else { '' }
+$claudeIgnored = $false
+$gitClaude = Get-Command git.exe -ErrorAction SilentlyContinue
+if ($null -ne $gitClaude -and $claudeText) {
+    & $gitClaude.Source -C $repoRoot check-ignore -q -- CLAUDE.md
+    $claudeIgnored = ($LASTEXITCODE -eq 0)
+}
+if ($claudeText -match '(?m)^@AGENTS\.md\s*$' -and -not $claudeIgnored) {
+    Add-CheckPass 'root CLAUDE.md is an unignored Claude Code adapter that imports AGENTS.md'
+}
+else {
+    Add-CheckFailure 'root CLAUDE.md must exist, stay unignored and import AGENTS.md (@AGENTS.md on its own line)'
 }
 
 $imageLinks = @([regex]::Matches($readme, '!\[[^\]]*\]\((files/readme-assets/[^)]+)\)') |

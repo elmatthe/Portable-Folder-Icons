@@ -12,15 +12,26 @@ Automation already establishes persisted `desktop.ini` state, attributes and fre
 resolution (`c-0003`). It does not establish painted icons, menu scrolling, or how many processes Explorer
 starts for a static verb.
 
-## M01 — Chooser reachability (coverage `PFI-M01`)
+## M01 — Menu reachability (coverage `PFI-M01`)
 
-1. Right-click a disposable folder, open **Folder Icons > Choose Folder Icon**.
-2. Note the display resolution and scaling. Count the rows visible without scrolling.
-3. Try to reach the last icon with: the mouse wheel; the bottom scroll arrow; the keyboard (Up/Down, End).
-4. Confirm **Reset to Default**, **Repair** and **Uninstall** stay reachable in the parent menu.
-5. Apply the last (bottom-most) icon and confirm that exact icon is applied (dispatch).
+Result on 2026-11-16 before Phase 0B: **FAIL** (only Choose Folder Icon with 15 icons; Reset, Repair and Uninstall
+missing). Retest after Phase 0B on 2026-11-16: **PASS** (user-reported; all checks below; Blue applied from the
+chooser, Teal from the overflow entry; no duplicate or stale entries). The user accepted the behaviour, not the
+two-entry layout as the final design. Retest after Phase 0B (ADR 015 layout; the Shell-built menu is proven by `c-0009`):
 
-Expected now: 21 rows. Record whether the list overflows on this display and which methods can reach every row.
+1. Double-click `Setup_and_Run-Portable-Folder-Icons.bat` and let it finish (current-user, no elevation).
+2. Right-click a disposable folder; on Windows 11 choose **Show more options**.
+3. Open **Folder Icons**. Expected order: **Reset to Default**, **Repair Portable Folder Icons**, **Uninstall Portable
+   Folder Icons**, a separator, **Choose Folder Icon**. Only look; do not run Repair or Uninstall here (M03/M04).
+4. Open **Choose Folder Icon**: the first 12 icons alphabetically (ignoring case). With the 21 icons installed on
+   2026-11-16: ai, Black, Blue, code, CSPW, excel, GitHub, Gray, Green, markdown, Orange, Pink.
+5. Find the separate top-level entry **Folder Icons (Purple–Yellow)**, normally directly below Folder Icons (record where
+   it appears): Purple, python, react, Red, root, Teal, vscode, work, Yellow. Every installed icon appears exactly once
+   across the two entries, reachable by mouse without scrolling.
+6. Apply one icon from the overflow entry (for example Teal) and confirm that exact icon is applied; then apply one
+   from Choose Folder Icon (for example Blue) and use Reset to Default on the same disposable folder.
+7. Confirm there is no duplicate Folder Icons entry, no leftover overflow entry and no other unexpected Folder Icons
+   item. Record the display resolution and scaling.
 
 ## M02 — Reset rendering (coverage `PFI-M02`)
 
