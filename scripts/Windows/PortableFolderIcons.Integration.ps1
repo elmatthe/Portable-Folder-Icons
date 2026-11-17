@@ -74,7 +74,12 @@ function New-PfiActionCommand {
         [string]$WScriptPath = (Join-Path $env:SystemRoot 'System32\wscript.exe')
     )
 
-    if ($Action -in @('Apply', 'Reset') -and -not $DeveloperMode) {
+    # Normal mode starts every action through the installed windowless launcher: wscript.exe has no console, and the
+    # launcher starts PowerShell with window style 0. Phase 0A.1: PowerShell's own '-WindowStyle Hidden' takes effect
+    # only after Windows has created the console, and when that console is handed to Windows Terminal (the Windows 11
+    # default terminal) it merely minimizes the terminal window, which stays open while a dialog is shown. Developer
+    # Mode keeps its direct PowerShell commands unchanged.
+    if (-not $DeveloperMode) {
         if ([string]::IsNullOrWhiteSpace($HiddenLauncherPath)) {
             throw 'The windowless action launcher path is required in normal mode.'
         }
@@ -337,14 +342,14 @@ function Get-PfiRegistryPlan {
     $plan.Add((New-PfiRegistryValue $repairPath 'MUIVerb' 'Repair Portable Folder Icons'))
     $plan.Add((New-PfiRegistryValue $repairPath 'MultiSelectModel' 'Player'))
     $plan.Add((New-PfiRegistryValue (Join-Path $repairPath 'command') '' (
-        New-PfiActionCommand $PowerShellPath $runtimeScript Repair
+        New-PfiActionCommand $PowerShellPath $runtimeScript Repair -DeveloperMode $DeveloperMode -HiddenLauncherPath $hiddenLauncher
     )))
 
     $uninstallPath = Join-Path $subcommandsShell 'Utility_0300_Uninstall'
     $plan.Add((New-PfiRegistryValue $uninstallPath 'MUIVerb' 'Uninstall Portable Folder Icons'))
     $plan.Add((New-PfiRegistryValue $uninstallPath 'MultiSelectModel' 'Player'))
     $plan.Add((New-PfiRegistryValue (Join-Path $uninstallPath 'command') '' (
-        New-PfiActionCommand $PowerShellPath $runtimeScript Uninstall
+        New-PfiActionCommand $PowerShellPath $runtimeScript Uninstall -DeveloperMode $DeveloperMode -HiddenLauncherPath $hiddenLauncher
     )))
     $plan.Add((New-PfiRegistryValue $SelectionBrokerClsidRoot '' 'Portable Folder Icons Selection Broker'))
     $plan.Add((New-PfiRegistryValue $SelectionBrokerClsidRoot 'PfiOwner' $script:PfiSelectionBrokerOwner))

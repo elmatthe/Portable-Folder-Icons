@@ -146,6 +146,41 @@ Classifications: SOURCE DEFECT, INSTALLATION/REGISTRATION DEFECT, ENVIRONMENT/DE
 Manual M03 (one folder, five folders, dialog count, exact text, console flash, Explorer problems) is **PENDING** and is
 listed in `files/dev-work/verification-gate/MANUAL-GATES.md`. M02 and M04 remain separate and pending.
 
+#### Redesign Phase 0A.1 — Windowless maintenance launch (2026-11-17; automated PASS, manual M03 retest PENDING; ADR 022)
+
+**M03 first run (user, 2026-11-17, Phase 0A at `3170d8f`, Developer Mode off).** Repair's function is a
+**provisional success**:
+- Setup accepted 21 icons.
+- One-folder and five-folder Repair each showed one correct result (21 of 21), with no error.
+- The Phase 0B menus kept working.
+
+**Window visibility FAILED.** A large Windows PowerShell terminal window appeared behind the result dialog.
+
+**Root cause (isolated probes on this PC; detail in ADR 022):**
+- Windows Terminal is the default terminal ("Let Windows decide").
+- The verb's `powershell.exe -WindowStyle Hidden` console was handed to Windows Terminal before PowerShell could hide
+  it.
+- Windows Terminal then only minimized the window, which stayed open for the whole process lifetime, including the
+  dialog.
+- Repair and Uninstall used the same command in both modes. Uninstall was affected the same way; its cleanup helper was
+  not.
+
+**Remediation (scope: `PortableFolderIcons.Integration.ps1` command construction, `Invoke-PortableFolderIcons.Hidden.vbs`,
+tests, docs):**
+- Normal-mode Repair and Uninstall now register `"<SystemRoot>\System32\wscript.exe" "<runtime>\Invoke-PortableFolderIcons.Hidden.vbs" -Action <Action>`.
+- The launcher starts the dispatcher with window style 0 and returns its exit code.
+- For maintenance only, the launcher shows one guided Error dialog when the dispatcher is missing or PowerShell ends
+  without a recognised result.
+- Developer Mode, Apply/Reset/selection, the broker, command identities, registry ownership, Setup and Uninstall
+  semantics are unchanged.
+
+| Item | Status | Evidence |
+|---|---|---|
+| Visible PowerShell / Windows Terminal window behind the Repair or Uninstall dialog (normal mode) | **Fixed (automated); M03 retest pending.** | `c-0010` launcher cases with a UI Automation window observer; probes recorded in ADR 022 |
+| Missing dispatcher script itself | **Fixed for normal mode** (launcher dialog, exit 1). Developer Mode is still silent. A dispatcher that exists but cannot be parsed exits 1 and stays silent (residual). | `c-0010` w6; `c-0003` `[FINDING]` reworded |
+| Single and overlapping Repair, Unicode install path, Uninstall declined and confirmed, module-load failure, launcher argument rejection, Apply/Reset/selection forwarding | **Pass** through the real `wscript.exe` launcher. | `c-0010` w1–w10; `c-0001` exact command strings |
+| One top-level Folder Icons menu (user requirement) | **Not implemented, not authorized here.** The Phase 0B two-entry layout stays the working fallback. ADR 019 is pending. | — |
+
 ### Redesign Phase 0B — Static-menu compatibility: restore utilities, reach every icon (implemented 2026-11-16; automated PASS; manual M01 PASS; working fallback, not the preferred final layout)
 
 **(Phase 0 final)** Design approved by the user on 2026-11-16 as the next implementation phase; **not implemented**. It replaces the earlier "chooser grouping" proposal (probe E4: nested groups share the same budget, so grouping inside one top-level entry cannot work) and the picker-window alternative (out of scope for Phase 0B). Rationale: ADR 015.

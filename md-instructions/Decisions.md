@@ -5,6 +5,73 @@ entries appear first.
 
 ---
 
+## 022 — Phase 0A.1: normal-mode Repair and Uninstall start through the windowless wscript launcher — 2026-11-17 — Claude
+
+**Status:** Implemented on `feature/v0.2.0` (automated `c-0001`, `c-0010`; coverage PFI-017); manual M03 retest
+pending. ADR 019 stays pending the user's picker-architecture approval, and ADR 020 stays deferred to Phase 7.
+
+**Context:**
+- M03 (user, 2026-11-17, Developer Mode off): Repair worked for one and five folders, but a large Windows PowerShell
+  terminal window appeared behind the result dialog.
+- The verb ran `powershell.exe -NoLogo -NoProfile -WindowStyle Hidden ... -Action Repair` directly. This was the same
+  in both modes, because Repair and Uninstall never received the Developer Mode setting.
+- **Evidence (isolated probes, this PC, Windows 11 25H2 build 26200, Windows Terminal 1.25.3131.0):**
+  - `HKCU\Console\%%Startup` has no delegation values ("Let Windows decide"), so Windows Terminal is the default
+    terminal.
+  - Started like Explorer starts a verb (ShellExecuteEx, SW_SHOWNORMAL), that command made Windows start a new
+    `WindowsTerminal.exe` and `OpenConsole.exe`. A 1129 x 635 window titled "Windows PowerShell" appeared about 1.1 s
+    after launch.
+  - When PowerShell applied `-WindowStyle Hidden` (about 0.7 s later), Windows Terminal only minimized that window.
+    It stayed open, minimized, for the whole process lifetime, including the dialog. In the user's real Explorer launch
+    it stayed visible behind the dialog.
+  - The same command started with SW_HIDE (what `WshShell.Run(command, 0)` does) created no window and no terminal
+    process. The WPF message box it showed was visible.
+- **Cause:** `-WindowStyle Hidden` is applied by PowerShell after Windows has created its console. With
+  default-terminal handoff, the console is a pseudo-console, and hiding it does not hide Windows Terminal's window.
+  Hiding at creation (STARTF_USESHOWWINDOW with SW_HIDE) prevents the handoff.
+- **Scope:** The same applied to Uninstall, which uses the same command shape. Uninstall's cleanup helper is unaffected
+  because it already starts with `Start-Process -WindowStyle Hidden` (SW_HIDE at creation).
+
+**Decision:**
+- With Developer Mode off, `New-PfiActionCommand` builds every action as
+  `"<SystemRoot>\System32\wscript.exe" "<runtime>\Invoke-PortableFolderIcons.Hidden.vbs" -Action <Action>`. This is the
+  existing, already-trusted launcher (ADR 010) that the broker uses for Apply/Reset.
+- Developer Mode keeps its direct PowerShell commands unchanged.
+- The launcher accepts exactly `-Action Repair` or `-Action Uninstall`, two arguments, and nothing else. It starts the
+  dispatcher with window style 0 and waits. It returns the dispatcher's exit code (0 completed, 1 failed, 2 cancelled,
+  3 partial).
+- **Maintenance only, to keep early failures visible now that no terminal shows them:**
+  - A missing dispatcher gives one Error dialog that names the file, says nothing changed and names the setup launcher;
+    exit 1.
+  - A PowerShell start failure, or any exit code outside 0..3, gives one Error dialog saying the result is unknown;
+    exit 1.
+  - The dialog is a `MsgBox` with MB_SETFOREGROUND.
+  - A verification seam mirrors the dispatcher's (ADR 021): `PFI_TEST_DIALOG_DIR`, never for the production install
+    root.
+- Apply/Reset and selection argument handling and behaviour are unchanged.
+- Command identities, verb keys, broker, CLSID, registry ownership, Setup, and Uninstall's prompts and removal
+  semantics are unchanged.
+
+**Alternatives rejected:**
+- `conhost.exe --headless`: undocumented.
+- Routing Repair through the broker: needs a broker rebuild, which is not authorized.
+- A new native launcher executable: endpoint security (X1).
+- Asking users to change their default terminal: not a fix.
+
+**Consequences / residual:**
+- Setup or Repair must run once to re-register the command. The old command keeps working until then.
+- In Developer Mode the old behaviour remains: a terminal window can appear, and a missing dispatcher is still silent
+  there.
+- A dispatcher that exists but cannot be parsed exits 1, the same as a reported failure, so the launcher cannot tell
+  them apart. It stays silent in normal mode, as Apply/Reset already were. Setup restores it.
+- Normal-mode maintenance now depends on Windows Script Host and VBScript, as Apply/Reset already did. VBScript is a
+  Windows Feature on Demand that Microsoft has announced for deprecation; that is a product-wide future risk, not a new
+  one.
+- Whether the dialog comes to the front in a real Explorer launch, and how many processes Explorer starts for five
+  folders, are M03.
+
+---
+
 ## 021 — Phase 0A: guarded runtime start, partial Repair, per-user maintenance lock with coalescing — 2026-11-17 — Claude
 
 **Status:** Implemented on `feature/v0.2.0` (automated `c-0001`, `c-0003`, `c-0010`); manual M03 pending. ADR 019 stays

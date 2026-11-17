@@ -40,4 +40,5 @@ c-0008	yes	300	windows	native	powershell.exe	-NoLogo	-NoProfile	-ExecutionPolicy
 c-0009	yes	900	windows	native	powershell.exe	-NoLogo	-NoProfile	-ExecutionPolicy	Bypass	-File	files/dev-work/verification-gate/tests/Test-PfiStaticCascadeMenu.ps1
 # c-0010 Phase 0A maintenance reliability: runs the INSTALLED dispatcher (Repair/Uninstall) as real separate processes against disposable
 # install copies with GUID-named HKCU test roots; dialogs are recorded, not shown. Damaged icons, damaged runtime, timeouts, abandoned and concurrent locks.
+# Phase 0A.1: also through the registered normal-mode command (wscript.exe + installed launcher), watching for console or Windows Terminal windows.
 c-0010	yes	900	windows	native	powershell.exe	-NoLogo	-NoProfile	-ExecutionPolicy	Bypass	-File	files/dev-work/verification-gate/tests/Test-PfiMaintenanceReliability.ps1

@@ -520,12 +520,31 @@ try {
     Assert-Equal (($registryPlan | Where-Object Name -eq 'DelegateExecute').Value -join ',') `
         (($developerPlan | Where-Object Name -eq 'DelegateExecute').Value -join ',') `
         'Developer Mode does not change selection transport or action identity'
+    # Phase 0A.1: normal mode starts Repair and Uninstall through the installed windowless launcher. PowerShell's
+    # -WindowStyle Hidden argument cannot hide a console that Windows hands to Windows Terminal (the Windows 11 default
+    # terminal), so it is no longer the normal-mode shape. Developer Mode keeps its direct PowerShell command unchanged.
+    $expectedLauncher = Join-Path (Join-Path $commandInstallRoot 'runtime') 'Invoke-PortableFolderIcons.Hidden.vbs'
+    $expectedDispatcher = Join-Path (Join-Path $commandInstallRoot 'runtime') 'Invoke-PortableFolderIcons.ps1'
     foreach ($utility in @('Repair', 'Uninstall')) {
-        $utilityCommand = ($developerPlan | Where-Object {
-            $_.Name -eq '' -and $_.Value -match (' -Action ' + $utility + '(?: |$)')
-        }).Value
-        Assert-True ($utilityCommand.Contains('-WindowStyle Hidden')) ($utility + ' command remains hidden and interactive dialogs remain available')
+        $verbKey = if ($utility -eq 'Repair') { 'Utility_0200_Repair' } else { 'Utility_0300_Uninstall' }
+        $utilityCommandPath = Join-Path (Join-Path (Join-Path $subcommandsRoot 'shell') $verbKey) 'command'
+        $normalCommand = @($registryPlan | Where-Object { $_.Path -eq $utilityCommandPath -and $_.Name -eq '' } |
+            Select-Object -ExpandProperty Value)
+        $developerCommand = @($developerPlan | Where-Object { $_.Path -eq $utilityCommandPath -and $_.Name -eq '' } |
+            Select-Object -ExpandProperty Value)
+        Assert-Equal ('"{0}" "{1}" -Action {2}' -f (Join-Path $env:SystemRoot 'System32\wscript.exe'), $expectedLauncher, $utility) `
+            ($normalCommand -join '|') ($utility + ' normal-mode command starts the installed windowless launcher, quoted exactly (spaces, &, (), %, !, non-ASCII)')
+        Assert-Equal ('"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -Action {1}' -f
+            $expectedDispatcher, $utility) ($developerCommand -join '|') ($utility + ' Developer Mode command is the unchanged direct PowerShell command')
     }
+    Assert-Throws {
+        New-PfiActionCommand -PowerShellPath 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' `
+            -ActionScriptPath $expectedDispatcher -Action Repair
+    } 'normal-mode Repair command requires the windowless launcher path'
+    Assert-Throws {
+        New-PfiActionCommand -PowerShellPath 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' `
+            -ActionScriptPath $expectedDispatcher -Action Uninstall -HiddenLauncherPath 'C:\Bad"Quote\Invoke-PortableFolderIcons.Hidden.vbs'
+    } 'maintenance command rejects a launcher path containing a quotation mark'
     Assert-True (@($registryPlan | Where-Object { $_.Value -eq 'Repair Portable Folder Icons' }).Count -eq 1) 'registry includes Repair'
     Assert-True (@($registryPlan | Where-Object { $_.Value -eq 'Uninstall Portable Folder Icons' }).Count -eq 1) 'registry includes Uninstall'
     $installedRegistryPlan = @(Get-PfiRegistryPlan -Manifest $installedManifest -InstallRoot $installRoot `
@@ -538,8 +557,9 @@ try {
     } | Select-Object -ExpandProperty Value)
     Assert-Equal 2 $installedCommands.Count 'only Repair and Uninstall retain static command lines'
     Assert-Equal 2 @($installedCommands | Where-Object {
-        $_.Contains('"' + (Join-Path (Join-Path $installRoot 'runtime') 'Invoke-PortableFolderIcons.ps1') + '"')
-    }).Count 'Repair and Uninstall point directly to the installed dispatcher'
+        $_.Contains('"' + (Join-Path (Join-Path $installRoot 'runtime') 'Invoke-PortableFolderIcons.Hidden.vbs') + '"') -and
+        -not $_.Contains('powershell.exe') -and -not $_.Contains('%1')
+    }).Count 'normal-mode Repair and Uninstall start the installed windowless launcher, not a PowerShell console'
     Assert-Equal ($acceptedCount + 1) @($installedRegistryPlan | Where-Object Name -eq 'DelegateExecute').Count `
         'Apply and Reset avoid legacy process-per-target command transport'
     Assert-True (Test-Path -LiteralPath (Join-Path (Join-Path $installRoot 'runtime') 'Invoke-PortableFolderIcons.ps1') -PathType Leaf) 'installed action dispatcher exists'
@@ -1424,6 +1444,8 @@ try {
         'windowless launcher authenticates the selection payload by SHA-256'
     Assert-True ($hiddenLauncherText.Contains('EncodeUtf16Hex(targetPath)')) `
         'windowless launcher retains backward-compatible single-target Unicode transport'
+    Assert-True ($hiddenLauncherText -match '(?m)^\s*ElseIf action = "Repair" Or action = "Uninstall" Then\r?\n\s*If arguments\.Count <> 2 Then WScript\.Quit 64') `
+        'windowless launcher accepts exactly -Action Repair or -Action Uninstall for maintenance (behaviour: gate c-0010)'
 
     $brokerSourceText = Get-Content -LiteralPath (
         Join-Path $repoRoot 'scripts\Windows\SelectionHandler\PortableFolderIcons.SelectionBroker.cs'

@@ -1,6 +1,74 @@
 # Portable Folder Icons — Handoff
 
-## Snapshot — 2026-11-17 (Phase 0A Repair reliability) — Claude Code (current)
+## Snapshot — 2026-11-17 (Phase 0A.1 windowless maintenance launch) — Claude Code (current)
+
+- **Machine and branch:**
+  - The original Windows 11 PC: 25H2 build 26200, Windows PowerShell 5.1.
+  - Default terminal: Windows Terminal 1.25.3131.0 ("Let Windows decide").
+  - Branch `feature/v0.2.0`.
+- **Start SHA:** `3170d8f2467bd0a112786ac18e17d7c23140c4bd` (Phase 0A, already on `origin`). **End SHA:** one narrow
+  Phase 0A.1 commit on top; read it with `git log -1` and compare with `git ls-remote origin feature/v0.2.0`. No merge,
+  tag, release, `main` change or version bump.
+- **User M03 first run (2026-11-17, Developer Mode off):**
+  - Setup succeeded with 21 icons.
+  - One folder: the correct 21 of 21 result.
+  - Five folders: the correct result, no error.
+  - The Phase 0B menus still worked.
+  - **A large Windows PowerShell terminal window appeared behind the Repair result dialog.**
+  - Classification: Repair's function is **provisionally successful**; the launcher visibility is a defect, now
+    remediated in automation, and **needs a manual retest**.
+- **Root cause (ADR 022, isolated probes):**
+  - The verb ran `powershell.exe -WindowStyle Hidden` directly, in both modes.
+  - Windows handed that console to Windows Terminal (a new window, 1129 x 635, about 1.1 s after launch) before
+    PowerShell could hide it.
+  - Windows Terminal then only minimized the window, which stayed for the whole process lifetime, including the dialog.
+  - The same command started hidden at creation (SW_HIDE, as the VBS launcher does) produced no window.
+  - Uninstall had the same shape; its cleanup helper was already hidden at creation.
+- **Remediation (Phase 0A.1):**
+  - `PortableFolderIcons.Integration.ps1`: normal mode registers Repair and Uninstall as `"<SystemRoot>\System32\wscript.exe"
+    "<runtime>\Invoke-PortableFolderIcons.Hidden.vbs" -Action <Action>`. Developer Mode keeps the direct command.
+  - `Invoke-PortableFolderIcons.Hidden.vbs`:
+    - Accepts exactly `-Action Repair|Uninstall`, runs the dispatcher with window style 0, waits, and returns its
+      exit code.
+    - Shows one guided Error dialog for a missing dispatcher, a PowerShell start failure, or an exit code outside 0..3.
+    - Test seam as in ADR 021.
+  - **Unchanged:** broker binaries and source, CLSID, verb keys and command identities, Apply/Reset/selection
+    dispatch, registry ownership, Setup's double-click flow, Uninstall's prompts and removal, and the Phase 0B
+    two-entry menu (still the working fallback).
+- **Not implemented, not authorized:** the single top-level Folder Icons menu.
+  - ADR 019 stays pending the user's final picker-architecture approval.
+  - ADR 020 and the root complete uninstaller stay deferred to Phase 7.
+- **Last verification:**
+  - Standalone `c-0010` on the final source: 126 passed, 0 failed (was 84); the run folder was removed.
+  - **Full gate `20261117T162252Z-a40c50`** (2026-11-17, 578 s, on `3170d8f` plus the uncommitted Phase 0A.1 tree;
+    inputs `c66c4230ac5ca891`, unchanged during the run):
+    - Overall **BLOCKED**, not PASS; no FAIL.
+    - PASS: path-budget, platform-scope, structure, docs, `c-0001` (580 passed, 0 failed, 1 blocked: harness launch
+      owned by `c-0002`), `c-0003` (97 passed, 14 findings), `c-0005`, `c-0006`, `c-0007` (145), `c-0008` (41),
+      `c-0009` (111) and `c-0010` (126, 0 failed).
+    - `c-0002` BLOCKED_BY_ENDPOINT_SECURITY: withheld, with cached x64 `0a71577b…` and x86 `4f589ac4…` not launched.
+    - `c-0004` NOT RUN (opt-in).
+    - Coverage: 15 of 16 required items; PFI-017 satisfied; PFI-006 is blocked only through `c-0002`.
+    - Agent review: no Critical, High or Medium findings. Three Low items: the unparsable-dispatcher residual,
+      pre-existing `%VAR%` expansion by `WshShell.Run`, and the observer's 100 ms polling.
+    - The run folder was removed after this record. The only later edits before the commit are this record and the
+      housekeeping it describes.
+- **Manual gates:** M03 retest **PENDING** (Setup first; then one folder, five folders, optional declined Uninstall;
+  checklist in `MANUAL-GATES.md`). M02 and M04 remain pending.
+- **Security:**
+  - No new executable, hook, DLL or service.
+  - The deleted W1 script was not recreated or run.
+  - The gate now also starts inbox `wscript.exe`, only on the launcher of disposable install copies; no block was
+    observed.
+- **Exact next action:** stop for user review.
+  - The user reruns `Setup_and_Run-Portable-Folder-Icons.bat`, then the M03 retest.
+  - Recommended next work, only after the user approves ADR 019: design the one-entry Folder Icons menu with option C
+    (Reset to Default, Repair, Choose Folder Icon… opening an out-of-process picker). It needs a broker rebuild and an
+    endpoint-security plan.
+- **Retained evidence (unchanged, each with a RETAIN.md):** `outputs/experiment-single-menu/`, `outputs/manual/`,
+  `outputs/retained-phase0-preedit/`, `files/backups/*`, `cache/native-harness/`.
+
+## Snapshot — 2026-11-17 (Phase 0A Repair reliability) — Claude Code (superseded by the snapshot above)
 
 - **Machine and branch:** the original Windows 11 PC (build 26200, Windows PowerShell 5.1), branch `feature/v0.2.0`.
 - **Start SHA:** `0459c9e457fa866b6bf51b4f6a76963193e3715b` (`docs: record P1 wheel results, W1 security block and menu
@@ -716,7 +784,7 @@ cache; it is forbidden here and was not implemented.
 | 23 | Major (UX) | Explorer menu | User requirement 2026-11-17: one top-level Folder Icons entry with one complete, wheel- and keyboard-scrollable icon list (native submenu preferred). Static registration cannot do it (16-entry cap); a native single submenu needs an in-process Explorer extension (ADR 019). P1 (user): the native popup does not scroll with the wheel; arrows and keyboard work. W1: the wheel works only through a menu hook, which in Explorer means in-process code plus a hook. | Open: user decision. Claude recommends C (picker launched from Choose Folder Icon…), or D; A (Phase 0B) stays the fallback | User / Claude |
 | 25 | Security incident | `outputs/experiment-single-menu/Test-MenuWheelFeasibility.ps1` (ignored experiment) | 2026-11-17 about 08:29: WatchGuard Endpoint Security 360 deleted the W1 wheel-experiment script, detection "Malware or potentially unwanted program (PUP)", action Deleted (local quarantine record `7b16cb86-a9e5-4b25-ad38-861fa7b478c2`, 08:29:36). The script used `Add-Type`, a thread-local `WH_MSGFILTER` hook, posted key and wheel messages, and a screen capture of its own menu. The trigger is unconfirmed. No process or hook remains, and Explorer and production were untouched. | BLOCKED_BY_ENDPOINT_SECURITY. Do not recreate or continue. Open: security owner reviews the console incident; any future hook experiment needs their authorization of an exact implementation | User / Claude |
 | 24 | Major (feature) | Complete removal | User requirement 2026-11-17: root `Uninstall-Portable-Folder-Icons.bat` as the only complete-uninstall entry point; Uninstall leaves the Explorer menu (ADR 020). | Open: plan Phase 7 (reconciled); register in the Feature Map (Open Issue 21) before coding | User |
-| 26 | Minor (reliability) | `Install-PortableFolderIcons.ps1`; static Repair/Uninstall verbs | Phase 0A gates left open (ADR 021). (a) Setup registers the menu without taking the per-user maintenance lock, so Setup running at the same moment as an Explorer Repair is not serialized. (b) If the installed dispatcher script itself is missing, the static `powershell.exe -WindowStyle Hidden -File <dispatcher>` command has no product code to show a dialog. Fixing (b) needs a different verb shape, a registry-shape change. | Open: (a) a later phase that touches setup; (b) with the final menu architecture (ADR 019) | Claude |
+| 26 | Minor (reliability) | `Install-PortableFolderIcons.ps1`; static Repair/Uninstall verbs | Phase 0A gates left open (ADR 021). (a) Setup registers the menu without taking the per-user maintenance lock, so Setup running at the same moment as an Explorer Repair is not serialized. (b) If the installed dispatcher script itself is missing, the static `powershell.exe -WindowStyle Hidden -File <dispatcher>` command has no product code to show a dialog. **2026-11-17 (Phase 0A.1, ADR 022): (b) fixed for normal mode**, where the launcher shows a guided dialog. Still silent: Developer Mode's unchanged direct command, and a dispatcher that exists but cannot be parsed (it exits 1, the same as a reported failure). | Open: (a) a later phase that touches setup; (b) residual with the final menu architecture (ADR 019) | Claude |
 | 13 | Major | Reset (D2) | Not reproduced at persisted-state or fresh-process Shell layers; rendering unverified. | Open: manual M02, then plan Phase 2 | User |
 | 14 | Major | Actions INI read | ANSI `desktop.ini` non-ASCII text corrupted by Apply/Reset (read as UTF-8, rewritten UTF-16LE). | Open: plan Phase 2 | Claude |
 | 15 | Minor | Reset attributes | Reset does not restore pre-existing folder ReadOnly; removes third-party icon fields. | Open: plan Phase 6 | Claude |
@@ -725,6 +793,20 @@ cache; it is forbidden here and was not implemented.
 
 ## Work Log (newest first)
 
+- 2026-11-17 (Phase 0A.1) — Windowless maintenance launch (ADR 022), from start SHA `3170d8f`.
+  - **Diagnosis:** read-only check of `HKCU\Console\%%Startup`, plus three disposable probes under the ignored
+    `files/temp/` (removed after recording). They used only inbox PowerShell, UI Automation reads and a UI Automation
+    close of their own test dialog. The results are in ADR 022.
+  - **Fix:** normal-mode Repair/Uninstall command construction; the launcher's maintenance branch with a guided error
+    dialog and test seam.
+  - **Tests:**
+    - `c-0001`: exact normal and Developer Mode command strings, with spaces, `&`, `()`, `%`, `!` and non-ASCII in the
+      install path; launcher-path validation.
+    - `c-0010`: the real `wscript.exe` launcher cases w1–w10, with a UI Automation window observer.
+    - `c-0003`: the D3 missing-dispatcher finding reworded.
+    - PFI-017 registered in `coverage.tsv` before the code.
+  - RED was shown before the fix: the launcher returned 64 for `-Action Repair`, and the plan still built the
+    `-WindowStyle Hidden` command.
 - 2026-11-17 (Phase 0A) — Implemented Redesign Phase 0A, Repair reliability (ADR 021), from start SHA `0459c9e`.
   - **Runtime:**
     - Guarded module loading in the dispatcher, with one visible dialog naming the failed file.
@@ -1135,6 +1217,19 @@ cache; it is forbidden here and was not implemented.
 ---
 
 ## Session Sync Log (newest first)
+
+### 2026-11-17 — Current Windows workspace — Phase 0A.1 windowless maintenance launch (Claude Code)
+
+- Started at `3170d8f`, which was already on `origin/feature/v0.2.0`. Made one Phase 0A.1 commit on top and pushed it
+  normally; read the SHA with `git log -1`. No merge, tag, release, `main` change or version bump.
+- Committed:
+  - Runtime: `scripts/Windows/PortableFolderIcons.Integration.ps1`,
+    `scripts/Windows/Invoke-PortableFolderIcons.Hidden.vbs`.
+  - Tests: `files/tests/Invoke-Tests.ps1`, gate `tests/Test-PfiMaintenanceReliability.ps1`,
+    `tests/Invoke-Phase0Diagnostics.ps1`.
+  - Gate registers: `checks.tsv`, `coverage.tsv`, `GATE.md`, `MANUAL-GATES.md`.
+  - Docs: Briefing, Changelog, Decisions, Handoff and the plan.
+- Left untracked and untouched: the personal ICOs in `files/ICO-Files/` and `files/extra-ICO-files-for-use/`.
 
 ### 2026-11-17 — Current Windows workspace — Phase 0A Repair reliability (Claude Code)
 

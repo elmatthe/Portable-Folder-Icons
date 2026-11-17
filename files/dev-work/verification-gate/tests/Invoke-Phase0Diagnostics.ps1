@@ -361,7 +361,7 @@ try {
     Assert-Gate ((-not $child.TimedOut) -and $child.ExitCode -eq 1) 'D3 dispatcher exits 1 when a runtime module is missing' ("exit {0}" -f $child.ExitCode)
     Assert-Gate ($dialogs.Count -eq 1 -and $dialogs[0].image -eq 'Error' -and ([string]$dialogs[0].message).Contains('PortableFolderIcons.Core.ps1 is missing') -and
         ([string]$dialogs[0].message).Contains('Setup_and_Run-Portable-Folder-Icons.bat')) 'D3 a missing runtime module shows one Error dialog naming the file and the setup launcher' ("{0} dialog(s)" -f $dialogs.Count)
-    Add-Finding 'D3' 'UNVERIFIED (registry-shape boundary)' 'If the installed dispatcher script itself is missing, the static Repair/Uninstall command (powershell.exe -WindowStyle Hidden -File <dispatcher>) has no product code to show a dialog. Fixing that needs a different verb shape; recorded for a later phase, not changed in Phase 0A.'
+    Add-Finding 'D3' 'UNVERIFIED (registry-shape boundary)' 'Since Phase 0A.1 the normal-mode Repair/Uninstall verb starts the installed windowless launcher, which shows one guided dialog when the dispatcher script is missing or PowerShell ends without a recognised result (gate c-0010). Still silent: Developer Mode, whose unchanged direct command (powershell.exe -WindowStyle Hidden -File <dispatcher>) has no product code before the dispatcher, and a dispatcher that exists but cannot be parsed, which exits 1 like a reported failure. Setup restores both.'
     # Concurrency: several processes re-registering at once, against isolated test registry roots, each holding the
     # per-user maintenance lock exactly as a Repair request does (Phase 0A, D3-C).
     $guid = [guid]::NewGuid().ToString('N')

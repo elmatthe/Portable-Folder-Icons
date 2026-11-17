@@ -2,6 +2,23 @@
 
 ## v0.1.1 — Unreleased
 
+### Phase 0A.1: windowless Repair and Uninstall — 2026-11-17 (`feature/v0.2.0`; version metadata still 0.1.1; manual M03 retest pending)
+
+- **Repair and Uninstall no longer open a PowerShell window.** On Windows 11,
+  where Windows Terminal is the default terminal, choosing Repair (or
+  Uninstall) opened a large Windows PowerShell terminal window that stayed
+  behind the result dialog until it was closed. With Developer Mode off, both
+  commands now start through the same windowless launcher that Apply and Reset
+  already use. The result, confirmation and error dialogs are unchanged.
+  Rerun `Setup_and_Run-Portable-Folder-Icons.bat` once so the menu uses the new
+  command.
+- **A missing runtime file is reported even earlier.** If the installed
+  dispatcher script is missing, or PowerShell stops without reporting a result,
+  the launcher shows one error dialog that names the problem and the setup
+  launcher, instead of failing silently.
+- Developer Mode keeps its previous direct PowerShell command, so a terminal
+  window can still appear there.
+
 ### Phase 0A: Repair reliability — 2026-11-17 (`feature/v0.2.0`; version metadata still 0.1.1; manual M03 pending)
 
 - **Repair and Uninstall always explain a failure.** If an installed runtime

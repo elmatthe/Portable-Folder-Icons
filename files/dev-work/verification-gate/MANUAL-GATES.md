@@ -46,16 +46,36 @@ Record each of the four layers separately: persisted state (automation), fresh-p
 
 ## M03 — Repair from the menu (coverage `PFI-M03`)
 
-Status: **PENDING** (Phase 0A, 2026-11-17). Automation (`c-0010`) proves the process behaviour: four overlapping
-Repair processes run one Repair and show one dialog, and the failure dialogs are visible in normal and Developer Mode.
-It cannot observe how many processes Explorer really starts, what is painted, or whether a console flashes.
-Do not corrupt the live installation to test failures; `c-0010` covers damaged copies.
+Status: **PENDING retest after Phase 0A.1** (2026-11-17).
 
-1. Double-click `Setup_and_Run-Portable-Folder-Icons.bat` and let it finish, so the installed runtime is the Phase 0A
-   one. Note whether Developer Mode is on or off (`config.toml`).
+First run (user, 2026-11-17, Phase 0A at `3170d8f`, Developer Mode off): **provisional PASS for Repair's function,
+FAIL for window visibility.**
+- Setup succeeded with 21 accepted icons.
+- One folder: one correct result, 21 of 21.
+- Five folders: one correct result, no error dialog.
+- The Phase 0B menus still worked.
+- **A large Windows PowerShell terminal window appeared behind the result dialog.**
+- Cause (Phase 0A.1; ADR 022): on this PC Windows Terminal is the default terminal. The verb's `powershell.exe
+  -WindowStyle Hidden` console is handed to Windows Terminal before PowerShell can hide it. Windows Terminal then only
+  minimizes its window, which stays open while the dialog is shown.
+- Phase 0A.1 starts normal-mode Repair and Uninstall through the installed `wscript.exe` launcher instead. Automation
+  (`c-0010`) watched the desktop during those launches and saw no console or terminal window.
+
+Automation (`c-0010`) proves the process behaviour, both directly and through the launcher:
+- Four overlapping Repair processes run one Repair and show one dialog.
+- The failure dialogs are visible.
+- No console or terminal window appears.
+
+It cannot observe how many processes Explorer really starts, or what a real Explorer launch paints, including whether
+the dialog comes to the front. Do not corrupt the live installation to test failures; `c-0010` covers damaged copies.
+
+1. Double-click `Setup_and_Run-Portable-Folder-Icons.bat` and let it finish, so the installed runtime and the
+   registered Repair command are the Phase 0A.1 ones. Note whether Developer Mode is on or off (`config.toml`).
 2. One folder: right-click one disposable folder, **Show more options**, **Folder Icons**, **Repair Portable Folder
    Icons**. Record:
-   - whether a console window flashes (and roughly how long);
+   - whether any PowerShell or Windows Terminal window appears, even briefly or minimized on the taskbar (expected in
+     normal mode: none);
+   - whether the result dialog appears in front of Explorer, or only as a taskbar button;
    - the number of dialogs (expected: exactly one, titled Portable Folder Icons, Information icon);
    - the exact dialog text. Expected, with N your installed icon count:
 
@@ -76,15 +96,18 @@ Do not corrupt the live installation to test failures; `c-0010` covers damaged c
    - the number of result dialogs (expected: one; more than one means coalescing did not hold for Explorer's launch
      timing — record how many and their text);
    - any error dialog, especially "Another Portable Folder Icons Repair or Uninstall is still running";
-   - how many console flashes you notice;
-   - optionally, in Task Manager, how many `powershell.exe` processes appear briefly (one per folder would confirm
-     that Explorer starts one process per selected item).
+   - any PowerShell or Windows Terminal window (expected: none);
+   - optionally, in Task Manager, how many `wscript.exe` and `powershell.exe` processes appear briefly (one each per
+     folder would confirm that Explorer starts one process per selected item).
 4. Afterwards: the Folder Icons menu is still complete (Reset, Repair, Uninstall, Choose Folder Icon, overflow entry),
    one icon applies normally, and Explorer showed no hang, restart, flicker of the whole desktop or missing menu.
-5. Record date, Windows build, display scaling, Developer Mode state and the results in
+5. Optional, Uninstall without uninstalling: choose **Uninstall Portable Folder Icons** on one folder and answer **No**.
+   Expected: one confirmation prompt, no PowerShell or terminal window, nothing removed (the menu stays).
+6. Record date, Windows build, display scaling, Developer Mode state and the results in
    `outputs/manual/<date>-results.md`, then summarize in Handoff. Pass needs: one dialog with the expected text in
-   both steps, no error dialog, no Explorer problem. A console flash is recorded, not failed (known limitation of the
-   static `powershell.exe -WindowStyle Hidden` command).
+   both steps, shown where you can see it, no error dialog, no PowerShell or terminal window in normal mode, and no
+   Explorer problem. In Developer Mode the verb keeps its direct `powershell.exe -WindowStyle Hidden` command, so a
+   terminal window there is recorded, not failed.
 
 ## M04 — Uninstall prompt with several folders (coverage `PFI-M04`, observe only)
 
