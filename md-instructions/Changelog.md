@@ -2,6 +2,37 @@
 
 ## v0.1.1 — Unreleased
 
+### Phase 0A: Repair reliability — 2026-11-17 (`feature/v0.2.0`; version metadata still 0.1.1; manual M03 pending)
+
+- **Repair and Uninstall always explain a failure.** If an installed runtime
+  file is missing or cannot be loaded, one error dialog names the file, says
+  nothing was changed and tells you to double-click
+  `Setup_and_Run-Portable-Folder-Icons.bat`. This holds with Developer Mode on
+  or off. Before, the hidden command failed silently. Every other Repair failure
+  (damaged settings, manifest or selection broker, or a menu that could not be
+  recreated) also names the problem and the setup launcher.
+- **A damaged cached icon no longer stops Repair.** Repair checks every cached
+  icon, recreates the menu with the verified ones, and lists each missing or
+  damaged icon as "not repaired and left out of the menu". It never claims to
+  have repaired a damaged icon and never downloads, generates or imports one.
+  It says Setup restores them from the icon files in your Portable Folder Icons
+  folder.
+- **Repair reports what it actually did.** The result lists the runtime and
+  broker check, "Cached icons verified: X of Y", whether the menu was
+  recreated, and the Developer Mode state.
+- **Overlapping Repair and Uninstall requests no longer race.** A short,
+  per-user lock (no service or background process) lets one Repair or Uninstall
+  run at a time. Overlapping Repair requests from one multi-folder selection
+  share one result dialog. A request that waits more than 60 seconds stops
+  with an explanation and changes nothing. A lock left behind by an interrupted
+  operation is taken over and reported.
+- **Interaction with Uninstall.** Repair after Uninstall reports that the
+  product is being or has been uninstalled and changes nothing. A second
+  confirmed Uninstall says the earlier one already removed it. Uninstall's
+  prompts, its cached-icon choice and what it removes are unchanged.
+- Explorer behaviour with a real multi-folder selection (dialog count, console
+  flash) is manual check M03, still pending.
+
 ### Phase 0B: accessible folder icon menus — 2026-11-16 (`feature/v0.2.0`; version metadata still 0.1.1)
 
 - **Folder Icons** lists Reset to Default, Repair Portable Folder Icons and

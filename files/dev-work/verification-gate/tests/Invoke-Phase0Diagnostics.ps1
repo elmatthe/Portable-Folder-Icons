@@ -323,27 +323,47 @@ try {
         $copy = Join-Path $FixtureRoot "d3-$name"
         Copy-Item -LiteralPath $baseInstall -Destination $copy -Recurse
         & $scenarios[$name] $copy
-        $outcome = 'Success'; $message = ''
-        try { $repair = Invoke-PfiRepair -InstallRoot $copy -SkipRegistry; $message = "validated $($repair.ValidatedIcons) icon(s)" }
-        catch { $outcome = 'Error'; $message = $_.Exception.Message }
-        $guided = $message -match '(?i)setup|Setup_and_Run|rerun'
-        $d3 += [pscustomobject][ordered]@{ Scenario = $name; Outcome = $outcome; Message = $message; NamesRecovery = $guided }
-        if ($name -eq 'healthy') { Assert-Gate ($outcome -eq 'Success') 'D3 Repair validates a healthy repository-independent install' $message }
-        else {
-            Assert-Gate ($outcome -eq 'Error') "D3 Repair does not report success when $name" $message
-            if (-not $guided) { Add-Finding 'D3' 'SOURCE DEFECT (error reporting)' ("{0}: Repair stops with <{1}> and does not tell the user to rerun Setup_and_Run, the only path that can restore it." -f $name, $message) }
+        $outcome = 'Error'; $message = ''; $damaged = 0
+        try {
+            $repair = Invoke-PfiRepair -InstallRoot $copy -SkipRegistry
+            $outcome = $repair.Outcome; $damaged = @($repair.DamagedIcons).Count
+            $message = Format-PfiRepairResult -Result $repair
         }
+        catch { $message = $_.Exception.Message }
+        $guided = $message.Contains('Setup_and_Run-Portable-Folder-Icons.bat')
+        $d3 += [pscustomobject][ordered]@{ Scenario = $name; Outcome = $outcome; Damaged = $damaged; Message = $message; NamesRecovery = $guided }
+        if ($name -eq 'healthy') { Assert-Gate ($outcome -eq 'Repaired') 'D3 Repair validates a healthy repository-independent install' $message }
+        elseif ($name -like '*-cached-icon') {
+            # Phase 0A (D3-B): one damaged cached icon no longer aborts Repair; it is diagnosed and NOT claimed repaired.
+            Assert-Gate ($outcome -eq 'PartiallyRepaired' -and $damaged -eq 1 -and $message.Contains('not repaired') -and
+                -not $message.Contains('Repair completed.')) "D3 Repair reports partial recovery, not success, when $name" $message
+        }
+        else { Assert-Gate ($outcome -eq 'Error') "D3 Repair does not report success when $name" $message }
+        # Phase 0A (D3-D): every Repair outcome other than full success names the setup launcher.
+        if ($name -ne 'healthy') { Assert-Gate $guided "D3 Repair tells the user to run Setup_and_Run when $name" $message }
     }
-    Add-Finding 'D3' 'SOURCE DEFECT (recovery boundary)' 'One missing or corrupt cached icon aborts Repair before re-registration, so Repair cannot restore the menu for the remaining valid icons.'
-    # The dispatcher dot-sources its modules before its try/catch, so a missing module fails with no dialog.
+    # Phase 0A (D3-A): the dispatcher loads its modules inside a guarded boundary, so a missing module is visible.
+    # The verification seam records the dialog instead of showing it (it is ignored for the production root).
     $dispatchCopy = Join-Path $FixtureRoot 'd3-dispatcher-missing-core'
     Copy-Item -LiteralPath $baseInstall -Destination $dispatchCopy -Recurse
     Remove-Item -LiteralPath (Join-Path $dispatchCopy 'runtime\PortableFolderIcons.Core.ps1') -Force
-    $child = Invoke-Child @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
-        (Join-Path $dispatchCopy 'runtime\Invoke-PortableFolderIcons.ps1'), '-Action', 'Repair') 60 'd3-dispatcher-missing-core'
-    Assert-Gate ((-not $child.TimedOut) -and $child.ExitCode -ne 0) 'D3 dispatcher exits non-zero when a runtime module is missing' ("exit {0}" -f $child.ExitCode)
-    Add-Finding 'D3' 'SOURCE DEFECT (error reporting)' ("With a runtime module missing the installed dispatcher exits {0} and writes only to stderr. The registered Repair/Uninstall commands run powershell.exe -WindowStyle Hidden, so the user sees nothing. stderr starts: <{1}>" -f $child.ExitCode, (($child.StdErr -replace '\s+', ' ').Trim() | ForEach-Object { $_.Substring(0, [Math]::Min(160, $_.Length)) }))
-    # Concurrency: several Repair processes re-registering at once, against isolated test registry roots.
+    $dialogDir = Join-Path $FixtureRoot 'd3-dispatcher-dialogs'
+    [void](New-Item -ItemType Directory -Force -Path $dialogDir)
+    $savedDialogDir = $env:PFI_TEST_DIALOG_DIR
+    try {
+        $env:PFI_TEST_DIALOG_DIR = $dialogDir
+        $child = Invoke-Child @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
+            (Join-Path $dispatchCopy 'runtime\Invoke-PortableFolderIcons.ps1'), '-Action', 'Repair') 60 'd3-dispatcher-missing-core'
+    }
+    finally { $env:PFI_TEST_DIALOG_DIR = $savedDialogDir }
+    $dialogs = @(Get-ChildItem -LiteralPath $dialogDir -Filter 'dialogs-*.jsonl' -File | ForEach-Object { [IO.File]::ReadAllLines($_.FullName) } |
+        Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+    Assert-Gate ((-not $child.TimedOut) -and $child.ExitCode -eq 1) 'D3 dispatcher exits 1 when a runtime module is missing' ("exit {0}" -f $child.ExitCode)
+    Assert-Gate ($dialogs.Count -eq 1 -and $dialogs[0].image -eq 'Error' -and ([string]$dialogs[0].message).Contains('PortableFolderIcons.Core.ps1 is missing') -and
+        ([string]$dialogs[0].message).Contains('Setup_and_Run-Portable-Folder-Icons.bat')) 'D3 a missing runtime module shows one Error dialog naming the file and the setup launcher' ("{0} dialog(s)" -f $dialogs.Count)
+    Add-Finding 'D3' 'UNVERIFIED (registry-shape boundary)' 'If the installed dispatcher script itself is missing, the static Repair/Uninstall command (powershell.exe -WindowStyle Hidden -File <dispatcher>) has no product code to show a dialog. Fixing that needs a different verb shape; recorded for a later phase, not changed in Phase 0A.'
+    # Concurrency: several processes re-registering at once, against isolated test registry roots, each holding the
+    # per-user maintenance lock exactly as a Repair request does (Phase 0A, D3-C).
     $guid = [guid]::NewGuid().ToString('N')
     $regBase = "HKCU:\Software\PortableFolderIcons\Tests\Phase0-$guid"
     $regShell = "$regBase\DirectoryShell"; $regParent = "$regShell\PortableFolderIcons"
@@ -354,11 +374,17 @@ try {
 `$ErrorActionPreference = 'Stop'
 . '$((Join-Path $runtimeSource 'PortableFolderIcons.Core.ps1').Replace("'", "''"))'
 . '$((Join-Path $runtimeSource 'PortableFolderIcons.Integration.ps1').Replace("'", "''"))'
+. '$((Join-Path $runtimeSource 'PortableFolderIcons.Maintenance.ps1').Replace("'", "''"))'
 `$manifest = Read-PfiManifest '$((Join-Path $baseInstall 'manifest.json').Replace("'", "''"))'
 `$errors = @()
 for (`$i = 0; `$i -lt 2; `$i++) {
-    try { [void](Register-PfiContextMenu -Manifest `$manifest -InstallRoot '$($baseInstall.Replace("'", "''"))' -RegistryRoot '$regParent' -SubcommandsRoot '$regSub' -SubcommandsReference '$reference' -IconChoicesRoot '$regChoices' -IconChoicesReference '$reference.IconChoices' -SelectionBrokerClsidRoot '$regClsid' -DirectoryShellRoot '$regShell') }
+    `$lock = `$null
+    try {
+        `$lock = Enter-PfiMaintenanceLock -InstallRoot '$($baseInstall.Replace("'", "''"))' -TimeoutSeconds 120
+        [void](Register-PfiContextMenu -Manifest `$manifest -InstallRoot '$($baseInstall.Replace("'", "''"))' -RegistryRoot '$regParent' -SubcommandsRoot '$regSub' -SubcommandsReference '$reference' -IconChoicesRoot '$regChoices' -IconChoicesReference '$reference.IconChoices' -SelectionBrokerClsidRoot '$regClsid' -DirectoryShellRoot '$regShell')
+    }
     catch { `$errors += `$_.Exception.Message }
+    finally { if (`$null -ne `$lock) { Exit-PfiMaintenanceLock `$lock } }
 }
 `$errors | ForEach-Object { Write-Output ('RACE-ERROR: ' + `$_) }
 "@
@@ -390,7 +416,9 @@ for (`$i = 0; `$i -lt 2; `$i++) {
     $leftClassKeys = @((Get-Item -LiteralPath 'HKCU:\Software\Classes').GetSubKeyNames() | Where-Object { $_.StartsWith($reference, [StringComparison]::OrdinalIgnoreCase) })
     Assert-Gate (-not (Test-Path -LiteralPath $regBase) -and -not (Test-Path -LiteralPath $regClsid) -and $leftClassKeys.Count -eq 0) 'D3 isolated race registry roots, including overflow stores, are removed' ($leftClassKeys -join ', ')
     $distinct = @($raceErrors | ForEach-Object { ($_ -replace '^RACE-ERROR: ', '') } | Sort-Object -Unique)
-    Add-Finding 'D3' $(if ($raceErrors.Count -gt 0) { 'SOURCE DEFECT (concurrency, isolated reproduction)' } else { 'UNVERIFIED' }) ("4 concurrent processes x 2 re-registrations against isolated roots produced {0} error(s); final chooser verbs {1}/{2}, COM LocalServer32 present={3}. Distinct: {4}. Whether Explorer starts one Repair process per selected folder (static verb, MultiSelectModel=Player) is a manual check." -f $raceErrors.Count, $finalVerbs, $accepted.Count, $finalOwned, (($distinct | Select-Object -First 3) -join ' || '))
+    Assert-Gate ($raceErrors.Count -eq 0) 'D3 4 concurrent processes x 2 lock-serialized re-registrations produce no error' (($distinct | Select-Object -First 3) -join ' || ')
+    Assert-Gate ($finalVerbs -eq $accepted.Count -and $finalOwned) 'D3 after lock-serialized concurrent re-registration the menu is complete' ("chooser verbs {0}/{1}, COM LocalServer32 present={2}" -f $finalVerbs, $accepted.Count, $finalOwned)
+    Add-Finding 'D3' 'UNVERIFIED (manual M03)' 'Whether Explorer starts one Repair process per selected folder (static verb, MultiSelectModel=Player), how many dialogs a real multi-folder Repair shows, and any console flash are manual checks (M03). Setup_and_Run registration is not coordinated with the maintenance lock (outside Phase 0A).'
     $sections['D3'] = [pscustomobject]@{ Scenarios = $d3; RaceErrors = $raceErrors.Count; RaceDistinct = $distinct; FinalVerbs = $finalVerbs; FinalComOwned = $finalOwned }
 
     # ---------------------------------------------------------------- D4 ordinary Uninstall

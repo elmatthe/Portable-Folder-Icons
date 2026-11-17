@@ -1461,6 +1461,13 @@ try {
     $repairResult = Invoke-PfiRepair -InstallRoot $installRoot -SkipRegistry
     Assert-Equal $acceptedCount $repairResult.ValidatedIcons 'repair validates all installed cached icons'
     Assert-Equal $false $repairResult.ImportedRepositoryIcons 'repair never claims repository import'
+    Assert-Equal 'Repaired' $repairResult.Outcome 'healthy repair reports a full repair'
+    Assert-Equal 'Skipped' $repairResult.Registry 'repair reports that registration was skipped when asked to skip it'
+    $healthyText = Format-PfiRepairResult -Result $repairResult
+    Assert-True ($healthyText.StartsWith('Repair completed.') -and $healthyText.Contains(('- Cached icons verified: {0} of {0}' -f $acceptedCount))) `
+        'healthy repair message reports what was verified'
+    Assert-True ((Format-PfiRepairResult -Result $repairResult -PreviousOperationInterrupted).Contains('A previous Repair or Uninstall ended before it finished.')) `
+        'repair message reports an abandoned earlier operation'
 
     $manifestBeforeConflict = [IO.File]::ReadAllText((Join-Path $installRoot 'manifest.json'))
     Write-PfiInstalledSettings (New-PfiInstalledSettings -DeveloperMode $true) (Join-Path $installRoot 'settings.json')
@@ -1473,7 +1480,26 @@ try {
             -InstallRoot $installRoot -SkipRefresh
     } 'apply rejects cached ICO with wrong hash'
     Assert-Equal $false (Test-Path -LiteralPath (Join-Path $integrityFolder 'desktop.ini')) 'hash failure leaves target unchanged'
-    Assert-Throws { Invoke-PfiRepair -InstallRoot $installRoot -SkipRegistry } 'repair reports corrupt installed cache'
+    # Phase 0A (D3-B): Repair diagnoses the damaged icon, keeps the healthy ones and never claims it repaired it;
+    # the strict runtime check used by the broker suite still rejects the damaged cache.
+    Assert-Throws { Test-PfiInstalledRuntime -InstallRoot $installRoot } 'strict runtime validation still rejects a corrupt installed cache'
+    $partialRepair = Invoke-PfiRepair -InstallRoot $installRoot -SkipRegistry
+    Assert-Equal 'PartiallyRepaired' $partialRepair.Outcome 'repair reports partial recovery for a corrupt installed cache'
+    Assert-Equal ($acceptedCount - 1) $partialRepair.ValidatedIcons 'partial repair counts only the verified cached icons'
+    Assert-Equal 1 @($partialRepair.DamagedIcons).Count 'partial repair diagnoses the one damaged cached icon'
+    Assert-Equal 'Corrupt' @($partialRepair.DamagedIcons)[0].Problem 'partial repair classifies a hash mismatch as corrupt'
+    Assert-Equal 'corrupt' ([IO.File]::ReadAllText($corruptCachePath)) 'partial repair leaves the damaged bytes untouched'
+    $partialText = Format-PfiRepairResult -Result $partialRepair
+    Assert-True ($partialText.StartsWith('Repair partially completed.') -and $partialText.Contains('not repaired and left out of the menu') -and
+        $partialText.Contains('Setup_and_Run-Portable-Folder-Icons.bat') -and -not $partialText.Contains('Repair completed.')) `
+        'partial repair message says the damaged icon was not repaired and names the setup launcher'
+    Assert-True ($partialText.Contains('- Explorer menu: not changed') -and $partialText.Contains('- Developer Mode: on')) `
+        'repair message distinguishes skipped registration and reports Developer Mode'
+    $lockName = Get-PfiMaintenanceLockName -InstallRoot $installRoot
+    Assert-True ($lockName.StartsWith('Local\PortableFolderIcons.Maintenance.' + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value + '.')) `
+        'maintenance lock is per user and per logon session, never Global'
+    Assert-Equal $lockName (Get-PfiMaintenanceLockName -InstallRoot ($installRoot.ToUpperInvariant() + '\')) 'maintenance lock name ignores install-root case and trailing separator'
+    Assert-True ($lockName -ne (Get-PfiMaintenanceLockName -InstallRoot (Join-Path $testRoot 'Other Install'))) 'maintenance lock is per installation'
     $savedPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     & $windowsPowerShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $installer `

@@ -5,6 +5,70 @@ entries appear first.
 
 ---
 
+## 021 — Phase 0A: guarded runtime start, partial Repair, per-user maintenance lock with coalescing — 2026-11-17 — Claude
+
+**Status:** Implemented on `feature/v0.2.0` (automated `c-0001`, `c-0003`, `c-0010`); manual M03 pending. ADR 019 stays
+pending and ADR 020 stays deferred to Phase 7.
+**Context:** Phase 0 (D3) found four Repair problems.
+- Runtime modules were dot-sourced before the dispatcher's `try`. The static verb runs `powershell.exe -WindowStyle
+  Hidden`, so a missing module failed with no visible message.
+- Failure messages never named `Setup_and_Run-Portable-Folder-Icons.bat`.
+- One missing or corrupt cached icon aborted re-registration for every icon.
+- Concurrent re-registration raced in isolated roots. Repair and Uninstall are static `MultiSelectModel=Player` verbs,
+  so one multi-folder selection may start several processes.
+
+**Decision:**
+- **Guarded start.** The dispatcher defines its dialog function first, then loads each module inside a guarded
+  boundary. A missing or unloadable module shows one Error dialog naming the file, saying nothing changed and naming
+  the setup launcher, in both modes, then exits 1. The normal-mode windowless success path is unchanged.
+- **Partial Repair inside the existing contract.**
+  - `Get-PfiInstalledRuntimeState` still throws for runtime, broker, settings and manifest damage, and for any manifest
+    entry whose `cachedFilename` is not `<hash>.ico`.
+  - It diagnoses every cached icon as Missing, Corrupt or Unreadable instead of stopping at the first one.
+  - Repair registers an in-memory manifest of the verified icons through the unchanged `Register-PfiContextMenu`. Apply
+    verbs renumber, and the broker validates only the verb pattern plus the hash, so no broker, contract or
+    registry-shape change is needed.
+  - Damaged files and the installed manifest are left untouched and reported as not repaired. Nothing is downloaded,
+    generated or imported.
+  - `Test-PfiInstalledRuntime` keeps its strict throw for the installed-COM runner.
+- **Coordination.**
+  - One named `System.Threading.Mutex` in the `Local\` (logon-session) namespace:
+    `PortableFolderIcons.Maintenance.<user SID>.<16 hex of SHA-256(lowercased install root)>`.
+  - It is held only around Repair's validation and registration, or Uninstall's removal. It is never held while a
+    dialog is open, and it is released in `finally`.
+  - The wait is bounded (60 s). A timeout throws `TimeoutException` and changes nothing.
+  - An abandoned lock (`AbandonedMutexException`) is taken over and reported. A named kernel mutex disappears when its
+    last handle closes, so a crashed holder with nobody waiting leaves nothing that could block later requests.
+  - No global lock, service, watcher, daemon or lock file.
+- **Serialization versus coalescing are separate.**
+  - The lock serializes.
+  - Under the lock, Repair writes `state\maintenance.json` with its start time. A later Repair whose process started at
+    or before that recorded start exits 0 silently, because its work was just done and reported. The test is "started
+    at or before", not a time window.
+  - A Repair requested after an earlier one finished runs again.
+- **Uninstall interaction.**
+  - Uninstall's two prompts are unchanged and shown before the lock.
+  - Under the lock, an Uninstall that finds the removal already started (cleanup marker or missing runtime, plus absent
+    registration) reports that and changes nothing.
+  - Repair in that state refuses rather than re-registering against a runtime the deferred cleanup helper is about to
+    delete.
+  - Ownership, removal policy and cache behaviour are unchanged.
+- **Exit codes** (no caller depends on them; for tests): 0 completed or coalesced, 1 failed, 2 cancelled, 3 partially
+  repaired.
+- **Verification seam.** The dispatcher has a test-only seam (`PFI_TEST_DIALOG_DIR`, answers, approved GUID test
+  registry roots, lock timeout). It records dialogs as JSON instead of showing them, and is ignored when the install
+  root is the production `%LOCALAPPDATA%\Portable-Folder-Icons`. Without approved test roots it skips the registry.
+
+**Consequences / unresolved gates:**
+- Setup (`Install-PortableFolderIcons.ps1`) still registers without taking the lock. Coordinating it is outside Phase 0A.
+- If the dispatcher script itself is missing, the static hidden command still shows nothing. Fixing that needs a
+  different verb shape, which is a registry-shape change and is not made here.
+- The `-WindowStyle Hidden` console flash and the real process count per selection are recorded by M03.
+- Coalescing uses process start times, so a Repair requested while another is already running is folded into it only
+  if that one started after this request was launched; otherwise it runs once more, which is harmless and serialized.
+
+---
+
 ## 020 — Complete removal only through a root Uninstall launcher; Uninstall leaves the Explorer menu — 2026-11-17 — Claude
 
 **Status:** Accepted requirement (user, 2026-11-17). Design and implementation pending (reconciled Phase 7); nothing

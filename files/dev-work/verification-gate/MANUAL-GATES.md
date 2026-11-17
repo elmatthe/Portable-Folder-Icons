@@ -46,11 +46,45 @@ Record each of the four layers separately: persisted state (automation), fresh-p
 
 ## M03 — Repair from the menu (coverage `PFI-M03`)
 
-1. With one folder selected, choose **Repair Portable Folder Icons**. Record whether a console flashes and the
-   exact result dialog text.
-2. With five disposable folders selected, choose Repair once. Record how many result dialogs or error dialogs
-   appear (one per folder would confirm that Explorer starts one process per selected item).
-3. Do not corrupt the live installation to test failures; automation covers damaged copies.
+Status: **PENDING** (Phase 0A, 2026-11-17). Automation (`c-0010`) proves the process behaviour: four overlapping
+Repair processes run one Repair and show one dialog, and the failure dialogs are visible in normal and Developer Mode.
+It cannot observe how many processes Explorer really starts, what is painted, or whether a console flashes.
+Do not corrupt the live installation to test failures; `c-0010` covers damaged copies.
+
+1. Double-click `Setup_and_Run-Portable-Folder-Icons.bat` and let it finish, so the installed runtime is the Phase 0A
+   one. Note whether Developer Mode is on or off (`config.toml`).
+2. One folder: right-click one disposable folder, **Show more options**, **Folder Icons**, **Repair Portable Folder
+   Icons**. Record:
+   - whether a console window flashes (and roughly how long);
+   - the number of dialogs (expected: exactly one, titled Portable Folder Icons, Information icon);
+   - the exact dialog text. Expected, with N your installed icon count:
+
+     ```text
+     Repair completed.
+
+     Checked:
+     - Runtime files and selection broker: valid
+     - Cached icons verified: N of N
+     - Explorer menu: recreated with N icon(s)
+     - Developer Mode: off
+
+     Repair does not import new icons. To add or remove icons, double-click Setup_and_Run-Portable-Folder-Icons.bat.
+     ```
+
+     (`- Developer Mode: on` when it is on.)
+3. Five folders: select five disposable folders together and choose Repair once. Record:
+   - the number of result dialogs (expected: one; more than one means coalescing did not hold for Explorer's launch
+     timing — record how many and their text);
+   - any error dialog, especially "Another Portable Folder Icons Repair or Uninstall is still running";
+   - how many console flashes you notice;
+   - optionally, in Task Manager, how many `powershell.exe` processes appear briefly (one per folder would confirm
+     that Explorer starts one process per selected item).
+4. Afterwards: the Folder Icons menu is still complete (Reset, Repair, Uninstall, Choose Folder Icon, overflow entry),
+   one icon applies normally, and Explorer showed no hang, restart, flicker of the whole desktop or missing menu.
+5. Record date, Windows build, display scaling, Developer Mode state and the results in
+   `outputs/manual/<date>-results.md`, then summarize in Handoff. Pass needs: one dialog with the expected text in
+   both steps, no error dialog, no Explorer problem. A console flash is recorded, not failed (known limitation of the
+   static `powershell.exe -WindowStyle Hidden` command).
 
 ## M04 — Uninstall prompt with several folders (coverage `PFI-M04`, observe only)
 

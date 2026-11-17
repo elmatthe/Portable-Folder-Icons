@@ -13,11 +13,95 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
 $installRoot = Split-Path -Parent $PSScriptRoot
-. (Join-Path $PSScriptRoot 'PortableFolderIcons.Core.ps1')
-. (Join-Path $PSScriptRoot 'PortableFolderIcons.Selection.ps1')
-. (Join-Path $PSScriptRoot 'PortableFolderIcons.Integration.ps1')
-. (Join-Path $PSScriptRoot 'PortableFolderIcons.Actions.ps1')
-. (Join-Path $PSScriptRoot 'PortableFolderIcons.Maintenance.ps1')
+# Repeated here because the runtime modules that also hold it may be the thing that is missing.
+$pfiSetupGuidance = 'To restore Portable Folder Icons, double-click Setup_and_Run-Portable-Folder-Icons.bat in your Portable Folder Icons folder. It needs no administrator rights.'
+
+# Verification seam (Phase 0A, ADR 021). The gate runs this real dispatcher from a disposable install root and records
+# its dialogs as JSON files instead of showing them. It is honoured ONLY when PFI_TEST_DIALOG_DIR is set AND this
+# runtime is not the production install root, so the installed product always shows its dialogs. In test mode the
+# Explorer menu is changed only under approved test registry roots (PFI_TEST_REGISTRY_ROOTS), never production keys.
+$pfiTestDialogDir = $null
+$pfiTestAnswers = New-Object 'System.Collections.Generic.Queue[string]'
+$pfiTestSequence = 0
+if (-not [string]::IsNullOrWhiteSpace($env:PFI_TEST_DIALOG_DIR) -and
+    -not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+    $pfiProductionRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Portable-Folder-Icons')).TrimEnd('\')
+    if (-not ([IO.Path]::GetFullPath($installRoot).TrimEnd('\')).Equals($pfiProductionRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        $pfiTestDialogDir = [IO.Path]::GetFullPath($env:PFI_TEST_DIALOG_DIR)
+        foreach ($pfiAnswer in @(([string]$env:PFI_TEST_DIALOG_ANSWERS) -split ',')) {
+            if (-not [string]::IsNullOrWhiteSpace($pfiAnswer)) { $pfiTestAnswers.Enqueue($pfiAnswer.Trim()) }
+        }
+    }
+}
+
+function Write-PfiTestRecord {
+    param([string]$Kind, [System.Collections.IDictionary]$Record)
+    $script:pfiTestSequence++
+    $Record['processId'] = $PID
+    $Record['sequence'] = $script:pfiTestSequence
+    $Record['utcTicks'] = [DateTime]::UtcNow.Ticks
+    $path = Join-Path $script:pfiTestDialogDir ('{0}-{1}.jsonl' -f $Kind, $PID)
+    [IO.File]::AppendAllText($path, (($Record | ConvertTo-Json -Compress) + "`n"), (New-Object Text.UTF8Encoding($false)))
+}
+
+function Show-PfiDialog {
+    # The one place this dispatcher shows a message box (Apply's completion box and the batch window excepted).
+    param(
+        [string]$Message,
+        [string]$Title = 'Portable Folder Icons',
+        [ValidateSet('OK', 'YesNo')][string]$Buttons = 'OK',
+        [ValidateSet('Information', 'Warning', 'Error')][string]$Image = 'Information'
+    )
+    if ($null -ne $script:pfiTestDialogDir) {
+        $answer = 'OK'
+        if ($Buttons -eq 'YesNo') {
+            $answer = if ($script:pfiTestAnswers.Count -gt 0) { $script:pfiTestAnswers.Dequeue() } else { 'No' }
+        }
+        Write-PfiTestRecord 'dialogs' ([ordered]@{ title = $Title; buttons = $Buttons; image = $Image; answer = $answer; message = $Message })
+        return $answer
+    }
+    Add-Type -AssemblyName PresentationFramework
+    $buttonValue = if ($Buttons -eq 'YesNo') { [Windows.MessageBoxButton]::YesNo } else { [Windows.MessageBoxButton]::OK }
+    $imageValue = switch ($Image) {
+        'Error' { [Windows.MessageBoxImage]::Error }
+        'Warning' { [Windows.MessageBoxImage]::Warning }
+        default { [Windows.MessageBoxImage]::Information }
+    }
+    return [string][Windows.MessageBox]::Show($Message, $Title, $buttonValue, $imageValue)
+}
+
+# Startup boundary (D3): the registered Repair/Uninstall commands run hidden, so a missing or unloadable module must
+# end in one visible dialog that names it, in normal and Developer Mode alike (settings cannot be read yet).
+$pfiModule = $null
+try {
+    foreach ($pfiModule in @(
+        'PortableFolderIcons.Core.ps1',
+        'PortableFolderIcons.Selection.ps1',
+        'PortableFolderIcons.Integration.ps1',
+        'PortableFolderIcons.Actions.ps1',
+        'PortableFolderIcons.Maintenance.ps1'
+    )) {
+        $pfiModulePath = Join-Path $PSScriptRoot $pfiModule
+        if (-not (Test-Path -LiteralPath $pfiModulePath -PathType Leaf)) {
+            throw (New-Object System.IO.FileNotFoundException('The file is missing.', $pfiModulePath))
+        }
+        . $pfiModulePath
+    }
+}
+catch {
+    $pfiProblem = if ($_.Exception -is [System.IO.FileNotFoundException]) { 'is missing' }
+    else { 'could not be loaded (' + ($_.Exception.Message -replace '\s+', ' ').Trim() + ')' }
+    $pfiRequest = if ([string]::IsNullOrWhiteSpace($Action)) { 'The requested action' } else { $Action }
+    try {
+        [void](Show-PfiDialog ("Portable Folder Icons could not start because its installed runtime file {0} {1}.`n`n{2} did not run. Nothing was changed.`n`n{3}" -f $pfiModule, $pfiProblem, $pfiRequest, $pfiSetupGuidance) `
+            'Portable Folder Icons' 'OK' 'Error')
+    }
+    catch { }
+    exit 1
+}
+if ($null -ne $pfiTestDialogDir) {
+    $script:PfiMaintenanceTrace = { param($EventName, $Detail) Write-PfiTestRecord 'trace' ([ordered]@{ event = $EventName; detail = $Detail }) }
+}
 
 try {
     $selectionMode = (
@@ -88,6 +172,39 @@ try {
     if ([string]::IsNullOrWhiteSpace($Action)) {
         throw 'An action is required.'
     }
+    if ($Action -in @('Repair', 'Uninstall')) {
+        # Phase 0A: coordinated, accurately reported maintenance (PortableFolderIcons.Maintenance.ps1).
+        $maintenanceArguments = @{
+            Action = $Action
+            InstallRoot = $installRoot
+            ShowDialog = ${function:Show-PfiDialog}
+        }
+        if ($null -ne $pfiTestDialogDir) {
+            # Test mode never touches the production menu: approved test roots, or no registry change at all.
+            $maintenanceArguments['SkipRegistry'] = $true
+            if (-not [string]::IsNullOrWhiteSpace($env:PFI_TEST_REGISTRY_ROOTS)) {
+                $testRoots = $env:PFI_TEST_REGISTRY_ROOTS | ConvertFrom-Json
+                $registryRoots = @{}
+                foreach ($rootName in @('RegistryRoot', 'SubcommandsRoot', 'SubcommandsReference', 'IconChoicesRoot',
+                        'IconChoicesReference', 'SelectionBrokerClsidRoot', 'DirectoryShellRoot')) {
+                    $registryRoots[$rootName] = [string]$testRoots.$rootName
+                }
+                if (-not $registryRoots['RegistryRoot'].StartsWith('HKCU:\Software\PortableFolderIcons\Tests\', [StringComparison]::OrdinalIgnoreCase) -or
+                    -not (Test-PfiApprovedRegistryRoots $registryRoots['RegistryRoot'] $registryRoots['SubcommandsRoot'] `
+                        $registryRoots['IconChoicesRoot'] $registryRoots['SelectionBrokerClsidRoot'] $registryRoots['DirectoryShellRoot'])) {
+                    throw 'Test mode accepts only approved test registry roots.'
+                }
+                $maintenanceArguments['RegistryRoots'] = $registryRoots
+                $maintenanceArguments['SkipRegistry'] = $false
+            }
+            $testTimeout = 0
+            if ([int]::TryParse([string]$env:PFI_TEST_LOCK_TIMEOUT_SECONDS, [ref]$testTimeout) -and $testTimeout -ge 0) {
+                $maintenanceArguments['LockTimeoutSeconds'] = $testTimeout
+            }
+        }
+        $maintenanceExit = @(Invoke-PfiMaintenanceRequest @maintenanceArguments)
+        exit ([int]$maintenanceExit[-1])
+    }
     if (-not [string]::IsNullOrEmpty($TargetPathHex)) {
         if ($TargetPathHex -notmatch '^(?:[0-9A-Fa-f]{4})+$') {
             throw 'The windowless launcher supplied an invalid target path.'
@@ -110,45 +227,6 @@ try {
         }
         'Reset' {
             $actionResult = Invoke-PfiReset -TargetPath $TargetPath -InstallRoot $installRoot
-        }
-        'Repair' {
-            $repair = Invoke-PfiRepair -InstallRoot $installRoot
-            Add-Type -AssemblyName PresentationFramework
-            [void][Windows.MessageBox]::Show(
-                ("Repair completed.`nRuntime: valid`nCached icons checked: {0}`nRegistry: recreated`nDeveloper Mode: {1}`n`nRepair does not import repository icons. Rerun repository setup to rescan them." -f $repair.ValidatedIcons, $repair.DeveloperMode),
-                'Portable Folder Icons',
-                [Windows.MessageBoxButton]::OK,
-                [Windows.MessageBoxImage]::Information
-            )
-            exit 0
-        }
-        'Uninstall' {
-            Add-Type -AssemblyName PresentationFramework
-            $confirm = [Windows.MessageBox]::Show(
-                "Remove the Folder Icons context menu and installed runtime?`n`nCustomized folders will not be changed. The hashed icon cache will be preserved by default so their icons keep working.",
-                'Uninstall Portable Folder Icons',
-                [Windows.MessageBoxButton]::YesNo,
-                [Windows.MessageBoxImage]::Warning
-            )
-            if ($confirm -ne [Windows.MessageBoxResult]::Yes) { exit 2 }
-            $purge = [Windows.MessageBox]::Show(
-                "Optional cache purge:`n`nPurging cached icons can BREAK icons already applied to folders.`n`nChoose Yes only if you intentionally want to purge the cache. Choose No to preserve it (recommended).",
-                'Purge cached icons?',
-                [Windows.MessageBoxButton]::YesNo,
-                [Windows.MessageBoxImage]::Warning
-            ) -eq [Windows.MessageBoxResult]::Yes
-            $result = Invoke-PfiUninstall -InstallRoot $installRoot -Confirmed -PurgeCache:$purge
-            [void][Windows.MessageBox]::Show(
-                $(if ($result.CachePreserved) {
-                    "Uninstall completed. Cached icons were preserved at:`n$($result.CachePath)`n`nThis keeps icons on already-customized folders working."
-                } else {
-                    'Uninstall completed and the cached icons were purged as requested.'
-                }),
-                'Portable Folder Icons',
-                [Windows.MessageBoxButton]::OK,
-                [Windows.MessageBoxImage]::Information
-            )
-            exit 0
         }
     }
     if (-not $developerMode -and
@@ -185,12 +263,15 @@ try {
     exit 0
 }
 catch {
-    Add-Type -AssemblyName PresentationFramework
-    [void][Windows.MessageBox]::Show(
-        $_.Exception.Message,
-        'Portable Folder Icons',
-        [Windows.MessageBoxButton]::OK,
-        [Windows.MessageBoxImage]::Error
-    )
+    $failureMessage = $_.Exception.Message
+    if ($_.Exception -is [System.Management.Automation.CommandNotFoundException]) {
+        $failureMessage = 'The installed runtime is damaged: ' + $failureMessage
+    }
+    if ($Action -in @('Repair', 'Uninstall') -and
+        $failureMessage -notmatch 'Setup_and_Run-Portable-Folder-Icons\.bat') {
+        $failureMessage = "{0} could not complete.`n`n{1}`n`n{2}" -f $Action, $failureMessage, $pfiSetupGuidance
+    }
+    try { [void](Show-PfiDialog $failureMessage 'Portable Folder Icons' 'OK' 'Error') }
+    catch { }
     exit 1
 }

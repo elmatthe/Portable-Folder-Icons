@@ -1,6 +1,64 @@
 # Portable Folder Icons — Handoff
 
-## Snapshot — 2026-11-17 (P1 results, wheel experiment, GitHub publication) — Claude Code (current)
+## Snapshot — 2026-11-17 (Phase 0A Repair reliability) — Claude Code (current)
+
+- **Machine and branch:** the original Windows 11 PC (build 26200, Windows PowerShell 5.1), branch `feature/v0.2.0`.
+- **Start SHA:** `0459c9e457fa866b6bf51b4f6a76963193e3715b` (`docs: record P1 wheel results, W1 security block and menu
+  recommendation`, parent `496b508`). The user-authorized publication pushed `feature/v0.2.0` to `origin` at
+  `0459c9e` before this assignment, and the remote SHA was verified. `origin/main` is unchanged at `6cb6bae`.
+- **End SHA:** this snapshot is written just before the one narrow Phase 0A commit on top of `0459c9e`, labelled
+  pending M03. Read the new SHA with `git log -1` and compare it with `git ls-remote origin feature/v0.2.0`. No merge,
+  tag, release, `main` change or version bump.
+- **Scope delivered (Redesign Phase 0A only; ADR 021; plan "Phase 0A outcome"):**
+  - Runtime: `scripts/Windows/Invoke-PortableFolderIcons.ps1` and `PortableFolderIcons.Maintenance.ps1`.
+  - Tests: new gate check `c-0010` (`tests/Test-PfiMaintenanceReliability.ps1`), updated `c-0003` D3 section and
+    `files/tests/Invoke-Tests.ps1`.
+  - Gate registration: `checks.tsv`, `coverage.tsv` (PFI-007 updated; PFI-015, PFI-016 added), `GATE.md` and
+    `MANUAL-GATES.md` (M03 checklist).
+  - Not changed: the broker, its contract, the registry shape, Apply/Reset, notification, resources, setup, and
+    Uninstall's prompts, ownership, removal policy and cache behaviour.
+- **D3 status:**
+  - **D3-A (missing or unloadable module): fixed.** One visible Error dialog names the file, says nothing changed and
+    names `Setup_and_Run-Portable-Folder-Icons.bat`. This holds in both modes, for Repair and Uninstall; exit 1.
+  - **D3-B (missing or corrupt cached icons): fixed with partial recovery.**
+    - Every damaged icon is diagnosed and listed as not repaired.
+    - The menu is recreated for the verified icons, healthy files are untouched, and nothing is imported.
+    - Exit 3, with a Warning dialog.
+  - **D3-C (concurrency): fixed for Repair and Uninstall.**
+    - One `Local\` per-user, per-install mutex with a 60 s bounded wait; abandoned-lock takeover; release in `finally`.
+    - Coalescing gives one dialog for overlapping Repairs.
+    - Repair after Uninstall refuses.
+  - **D3-D (accurate reporting): fixed.** Every Repair failure names the setup launcher.
+  - **Unresolved gates (Open Issue 26):** Setup is not coordinated with the lock, and a missing dispatcher script still
+    shows nothing (registry-shape boundary). The real Explorer process and dialog count is M03.
+- **X3:** both edited runtime scripts are ASCII-only. The uninstall test-root regex uses `\xC3\xBC`, which matches
+  exactly as before. `PortableFolderIcons.Actions.ps1` still has two non-ASCII lines (Phase 9).
+- **Last verification:**
+  - **Focused gate `20261117T152017Z-fce794`:** `c-0001` 575 passed, 0 failed, 1 blocked (harness launch withheld,
+    owned by `c-0002`); `c-0003` 97 passed, 0 failed (14 findings, D3 now only two UNVERIFIED); `c-0010` 84 passed, 0
+    failed. Focused mode reports overall BLOCKED by design.
+  - **Full gate `20261117T152716Z-f0faff`** (2026-11-17, on `0459c9e` plus the uncommitted Phase 0A tree):
+    - Overall **BLOCKED**, not PASS; no FAIL.
+    - PASS: path-budget, platform-scope, structure, docs, `c-0001`, `c-0003`, `c-0005`, `c-0006`, `c-0007` (145),
+      `c-0008` (41), `c-0009` (111) and `c-0010` (84, 0 failed).
+    - `c-0002` BLOCKED_BY_ENDPOINT_SECURITY: withheld, cached builds x64 `0a71577b…` and x86 `4f589ac4…` not launched.
+    - `c-0004` NOT RUN (opt-in).
+    - Coverage: 14 of 15 required items satisfied; PFI-006 is blocked only through `c-0002`.
+    - Agent review: no Critical, High or Low findings; the two remaining items are the UNVERIFIED D3 findings in Open
+      Issue 26 and M03.
+    - The run folder was removed after this record.
+- **Manual gates:** M03 **PENDING** (checklist in `MANUAL-GATES.md`: rerun Setup first, then one folder, five folders,
+  dialog count, exact text, console flash, Explorer problems). M02 and M04 remain separate and pending.
+- **Security restrictions (unchanged):** W1 is BLOCKED_BY_ENDPOINT_SECURITY (Open Issue 25) and must not be executed.
+  No new native executable was launched; the gate only starts inbox `powershell.exe` and reuses the classified harness
+  cache without launching it.
+- **Exact next action:** stop for user review. The user runs M03. ADR 019 (menu architecture) stays pending and ADR 020
+  (complete uninstaller) stays deferred to Phase 7. Do not start Phase 1 or later work, a picker, a menu replacement or
+  the complete uninstaller.
+- **Retained evidence, each with a RETAIN.md:** `outputs/experiment-single-menu/` (W1 incident), `outputs/manual/`
+  (M02–M04), `outputs/retained-phase0-preedit/`, `files/backups/*`, `cache/native-harness/`.
+
+## Snapshot — 2026-11-17 (P1 results, wheel experiment, GitHub publication) — Claude Code (superseded by the snapshot above)
 
 - **Machine and branch:** the original Windows 11 PC (build 26200.9725, Windows PowerShell 5.1), branch
   `feature/v0.2.0`. This snapshot is written just before the user-authorized documentation checkpoint commit on top of
@@ -658,6 +716,7 @@ cache; it is forbidden here and was not implemented.
 | 23 | Major (UX) | Explorer menu | User requirement 2026-11-17: one top-level Folder Icons entry with one complete, wheel- and keyboard-scrollable icon list (native submenu preferred). Static registration cannot do it (16-entry cap); a native single submenu needs an in-process Explorer extension (ADR 019). P1 (user): the native popup does not scroll with the wheel; arrows and keyboard work. W1: the wheel works only through a menu hook, which in Explorer means in-process code plus a hook. | Open: user decision. Claude recommends C (picker launched from Choose Folder Icon…), or D; A (Phase 0B) stays the fallback | User / Claude |
 | 25 | Security incident | `outputs/experiment-single-menu/Test-MenuWheelFeasibility.ps1` (ignored experiment) | 2026-11-17 about 08:29: WatchGuard Endpoint Security 360 deleted the W1 wheel-experiment script, detection "Malware or potentially unwanted program (PUP)", action Deleted (local quarantine record `7b16cb86-a9e5-4b25-ad38-861fa7b478c2`, 08:29:36). The script used `Add-Type`, a thread-local `WH_MSGFILTER` hook, posted key and wheel messages, and a screen capture of its own menu. The trigger is unconfirmed. No process or hook remains, and Explorer and production were untouched. | BLOCKED_BY_ENDPOINT_SECURITY. Do not recreate or continue. Open: security owner reviews the console incident; any future hook experiment needs their authorization of an exact implementation | User / Claude |
 | 24 | Major (feature) | Complete removal | User requirement 2026-11-17: root `Uninstall-Portable-Folder-Icons.bat` as the only complete-uninstall entry point; Uninstall leaves the Explorer menu (ADR 020). | Open: plan Phase 7 (reconciled); register in the Feature Map (Open Issue 21) before coding | User |
+| 26 | Minor (reliability) | `Install-PortableFolderIcons.ps1`; static Repair/Uninstall verbs | Phase 0A gates left open (ADR 021). (a) Setup registers the menu without taking the per-user maintenance lock, so Setup running at the same moment as an Explorer Repair is not serialized. (b) If the installed dispatcher script itself is missing, the static `powershell.exe -WindowStyle Hidden -File <dispatcher>` command has no product code to show a dialog. Fixing (b) needs a different verb shape, a registry-shape change. | Open: (a) a later phase that touches setup; (b) with the final menu architecture (ADR 019) | Claude |
 | 13 | Major | Reset (D2) | Not reproduced at persisted-state or fresh-process Shell layers; rendering unverified. | Open: manual M02, then plan Phase 2 | User |
 | 14 | Major | Actions INI read | ANSI `desktop.ini` non-ASCII text corrupted by Apply/Reset (read as UTF-8, rewritten UTF-16LE). | Open: plan Phase 2 | Claude |
 | 15 | Minor | Reset attributes | Reset does not restore pre-existing folder ReadOnly; removes third-party icon fields. | Open: plan Phase 6 | Claude |
@@ -665,6 +724,31 @@ cache; it is forbidden here and was not implemented.
 ---
 
 ## Work Log (newest first)
+
+- 2026-11-17 (Phase 0A) — Implemented Redesign Phase 0A, Repair reliability (ADR 021), from start SHA `0459c9e`.
+  - **Runtime:**
+    - Guarded module loading in the dispatcher, with one visible dialog naming the failed file.
+    - Partial Repair with per-icon diagnosis and a filtered in-memory manifest.
+    - A per-user `Local\` maintenance mutex with bounded wait, abandoned-lock takeover and coalescing.
+    - Accurate result and failure messages that always name the setup launcher.
+    - A test-only dialog seam, ignored for the production root.
+  - **Tests:** new `c-0010` (84 assertions). `c-0003` D3 FINDINGs became assertions, and its race now holds the lock.
+    The suite replaced "Repair throws on a corrupt cache" with partial-recovery, formatter and lock-name tests;
+    `Test-PfiInstalledRuntime` still throws.
+  - **Fixed during development:**
+    - The lock trace was written after `ReleaseMutex`, so another process could log its acquisition first. It is now
+      traced while still owned (`lock-releasing`).
+    - The abandoned-lock test assumed a crashed holder leaves a stale lock. A named kernel mutex disappears with its
+      last handle, so abandonment is seen only by a request that is already waiting. Both cases are now tested.
+  - **Feature register:** `coverage.tsv` (Open Issue 21: `Feature-Map.md` still does not exist).
+  - **Full gate:** `20261117T152716Z-f0faff`, BLOCKED (`c-0002` withheld, `c-0004` opt-in); every executed check
+    passed. Detail is in the snapshot.
+  - **Housekeeping:**
+    - Removed with the gate helper: focused run `20261117T152017Z-fce794` and full run `20261117T152716Z-f0faff`, after
+      recording them here.
+    - Removed by explicit path: the disposable dev runs `files/temp/p0a-dev1`, `files/temp/p0a-dev2`.
+    - Kept, each with a RETAIN.md: `experiment-single-menu/`, `manual/`, `retained-phase0-preedit/`, and
+      `cache/native-harness/`. — Claude
 
 - 2026-11-17 (P1, W1, publication) — Recorded the user's P1 results.
   - **Research:** read the Microsoft Learn pages on `WM_MOUSEWHEEL`, hooks, `MessageProc`, `SetWindowsHookEx`,
@@ -1051,6 +1135,16 @@ cache; it is forbidden here and was not implemented.
 ---
 
 ## Session Sync Log (newest first)
+
+### 2026-11-17 — Current Windows workspace — Phase 0A Repair reliability (Claude Code)
+
+- Started at `0459c9e`, which was already on `origin/feature/v0.2.0`. Made one Phase 0A commit (pending M03) on top and
+  pushed it normally; read the SHA with `git log -1`. No merge, tag, release, `main` change or version bump.
+- Committed: `scripts/Windows/Invoke-PortableFolderIcons.ps1`, `scripts/Windows/PortableFolderIcons.Maintenance.ps1`,
+  `files/tests/Invoke-Tests.ps1`, gate `checks.tsv`, `coverage.tsv`, `GATE.md`, `MANUAL-GATES.md`,
+  `tests/Invoke-Phase0Diagnostics.ps1`, `tests/Test-PfiMaintenanceReliability.ps1`, and Changelog, Decisions, Handoff
+  and the plan.
+- Left untracked and untouched: the personal ICOs in `files/ICO-Files/` and `files/extra-ICO-files-for-use/`.
 
 ### 2026-11-17 — Current Windows workspace — Phase 0B commit and single-menu feasibility (Claude Code)
 
