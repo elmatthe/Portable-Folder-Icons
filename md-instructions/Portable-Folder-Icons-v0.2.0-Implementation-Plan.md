@@ -114,7 +114,7 @@ Classifications: SOURCE DEFECT, INSTALLATION/REGISTRATION DEFECT, ENVIRONMENT/DE
 | D1 | Chooser shows only `ai`–`react`; remaining icons unreachable (**(Phase 0B)** implemented 2026-11-16; `c-0009` PASS on the Shell-built menu; M01 PASS 2026-11-16) | **M01 FAIL (user, 2026-11-16).** Discovery, validation, manifest, cache, registration, ordering and dispatch identity are correct (registry: 21 icon verbs, unchanged). **Cause established:** the Shell's static-menu builder (`SHCreateDefaultContextMenu`, fed an isolated copy of the product's own registry plan) includes **at most 16 entries per top-level static cascade, counted depth-first across all nested `ExtendedSubCommandsKey` submenus in key-name order**. Choose Folder Icon (1) + icons 0001–0015 = 16, exactly as in the screenshot; icons 0016–0021 are never added. Not a scrolling problem. Boundary measured: 12 icons show everything, 13 drops Uninstall, 14 drops Repair too, 21 drops all utilities and 6 icons. Nested alphabetical groups share the same budget (3×7 groups showed 2 groups only); a second top-level cascade gets its own 16. No Microsoft documentation found for this limit. | SOURCE DEFECT (design exceeds a WINDOWS SHELL limit; Phase 1's 30/50-icon tests checked the registry plan, never the Shell-built menu). Whether a Windows update since October changed the behaviour: UNVERIFIED | **Phase 0B (recommended next)** |
 | D5 | Folder Icons shows only Choose Folder Icon; Reset, Repair and Uninstall missing (**(Phase 0B)** implemented 2026-11-16; utilities first and always present in `c-0009`; M01 PASS 2026-11-16. Visibility only: the D2/D3/D4 defects below are unchanged) | **M01 FAIL (user, 2026-11-16).** Same cause as D1: the utilities' keys (`Utility_0100…0300`) sort after `Choice_0100_Icons`, whose 21 children exhaust the 16-entry budget first. Registered correctly; present in the registry; not rendered. With 19 icons in October the same budget would also hide them; three Windows updates were installed since (KB5127647 23 Oct, KB5127690 30 Oct, KB5134133 13 Nov; build 26200.9725). | SOURCE DEFECT (entry order + budget). Regression vs latent: UNVERIFIED | **Phase 0B (recommended next)** |
 | D2 | Reset does not reliably restore the default appearance | Persisted state and fresh-process Shell resolution return to the never-customized default for every standard case (plain, unrelated sections, preserved InfoTip, pre-existing ReadOnly, legacy v0.1.0, batch with duplicates, repeat Reset). Not reproduced at those layers. Separately found: Reset does not restore original folder ReadOnly ownership; ANSI desktop.ini non-ASCII text is corrupted (read as UTF-8, rewritten UTF-16LE); Reset removes any icon fields, including third-party ones. | Rendering: UNVERIFIED (M02, warm vs fresh view). Attribute ownership, ANSI corruption: SOURCE DEFECT | M02 first; Phase 2 (ANSI decoding, Reset rendering acceptance); Phase 6 (attribute ownership) |
-| D3 | Repair does not reliably work | Repair is repository-independent and never reports false success on damaged copies, but: every failure message omits that Setup_and_Run is the fix; one missing/corrupt cached icon aborts re-registration for all icons; a missing runtime module fails before the dispatcher's try/catch, and the registered command runs `-WindowStyle Hidden`, so the user sees nothing; concurrent re-registration races in isolated registry roots (errors such as "subkey marked for deletion"), and Repair/Uninstall are static `MultiSelectModel=Player` verbs, so a multi-folder selection may start several Repairs. | SOURCE DEFECT (error reporting, recovery boundary, concurrency reproduced in isolation). One-process-per-selected-item in Explorer: UNVERIFIED (M03). **2026-11-17: fixed by Phase 0A (automated); M03 pending; see "Phase 0A outcome"** | Phase 0A (after 0B, which first makes Repair visible again) |
+| D3 | Repair does not reliably work | Repair is repository-independent and never reports false success on damaged copies, but: every failure message omits that Setup_and_Run is the fix; one missing/corrupt cached icon aborts re-registration for all icons; a missing runtime module fails before the dispatcher's try/catch, and the registered command runs `-WindowStyle Hidden`, so the user sees nothing; concurrent re-registration races in isolated registry roots (errors such as "subkey marked for deletion"), and Repair/Uninstall are static `MultiSelectModel=Player` verbs, so a multi-folder selection may start several Repairs. | SOURCE DEFECT (error reporting, recovery boundary, concurrency reproduced in isolation). One-process-per-selected-item in Explorer: UNVERIFIED (M03). **2026-11-17: fixed by Phase 0A (automated) and Phase 0A.1 (windowless launch); M03 PASS (user retest 2026-11-17); see "Phase 0A outcome"** | Phase 0A (after 0B, which first makes Repair visible again) |
 | D4 | Ordinary Uninstall vs complete removal | Removes runtime/state/manifest/settings and owned registry; preserves cache and applied resources; customized folders keep working. The optional purge prompt deletes all of `icons/` with only a warning. | Behaviour as designed; purge prompt is the legacy warned purge (SOURCE DEFECT, safety) | Phase 7 |
 | X1 | (found) Endpoint security blocks freshly compiled unsigned executables | WatchGuard blocked the focused C# harness (`35482483…`), later classified it trusted, then blocked the next run's harness (`b2eaad08…`). **Cause on the project side established:** the harness is rebuilt on every run, and the inbox compiler gives each build a new PE timestamp and MVID (the only 18 differing bytes), so every run is a new, unclassified program. Installed/repository broker binaries start. | ENVIRONMENT/DEPENDENCY DEFECT + verification design (rebuild per run) | **(Phase 0 final)** Build-once cache implemented (cached builds x64 `0a71577b…`, x86 `4f589ac4…`, never launched). Still open: security owner decision for those builds; Phase 4 decision |
 | X2 | (found) Personal ICOs sit untracked in the public `files/ICO-Files` | Gate `c-0005` blocks staging them; custom directory is not imported | SOURCE DEFECT (import boundary) | Phase 3 |
@@ -132,7 +132,7 @@ Classifications: SOURCE DEFECT, INSTALLATION/REGISTRATION DEFECT, ENVIRONMENT/DE
 
 **Acceptance / stop:** Phase 0 `[FINDING]` items for D3 become passing assertions; no other behaviour changes.
 
-#### Phase 0A outcome (2026-11-17; automated PASS, manual M03 PENDING; ADR 021)
+#### Phase 0A outcome (2026-11-17; automated PASS, manual M03 PASS after Phase 0A.1; ADR 021)
 
 | Finding | Status after Phase 0A | Evidence |
 |---|---|---|
@@ -143,10 +143,11 @@ Classifications: SOURCE DEFECT, INSTALLATION/REGISTRATION DEFECT, ENVIRONMENT/DE
 | Missing dispatcher script itself | **Not fixed (registry-shape boundary).** The static hidden command has no product code to run. | `c-0003` `[FINDING]` UNVERIFIED |
 | X3 BOM-less non-ASCII literal | **Fixed where touched.** The uninstall test-root regex in `Maintenance.ps1` now uses `\xC3\xBC`; both edited runtime scripts are ASCII-only. | parse/ASCII check; `c-0001` |
 
-Manual M03 (one folder, five folders, dialog count, exact text, console flash, Explorer problems) is **PENDING** and is
-listed in `files/dev-work/verification-gate/MANUAL-GATES.md`. M02 and M04 remain separate and pending.
+Manual M03 (one folder, five folders, dialog count, exact text, console flash, Explorer problems; checklist in
+`files/dev-work/verification-gate/MANUAL-GATES.md`) **passed on the user's retest after Phase 0A.1 (2026-11-17)**; see
+the Phase 0A.1 section below. M02 and M04 remain separate and pending.
 
-#### Redesign Phase 0A.1 — Windowless maintenance launch (2026-11-17; automated PASS, manual M03 retest PENDING; ADR 022)
+#### Redesign Phase 0A.1 — Windowless maintenance launch (2026-11-17; automated PASS, manual M03 retest PASS; ADR 022)
 
 **M03 first run (user, 2026-11-17, Phase 0A at `3170d8f`, Developer Mode off).** Repair's function is a
 **provisional success**:
@@ -176,7 +177,7 @@ tests, docs):**
 
 | Item | Status | Evidence |
 |---|---|---|
-| Visible PowerShell / Windows Terminal window behind the Repair or Uninstall dialog (normal mode) | **Fixed (automated); M03 retest pending.** | `c-0010` launcher cases with a UI Automation window observer; probes recorded in ADR 022 |
+| Visible PowerShell / Windows Terminal window behind the Repair or Uninstall dialog (normal mode) | **Fixed.** Automated; **M03 retest PASS** (user, 2026-11-17) for Repair. The Uninstall path was not part of the retest. | `c-0010` launcher cases with a UI Automation window observer; probes recorded in ADR 022 |
 | Missing dispatcher script itself | **Fixed for normal mode** (launcher dialog, exit 1). Developer Mode is still silent. A dispatcher that exists but cannot be parsed exits 1 and stays silent (residual). | `c-0010` w6; `c-0003` `[FINDING]` reworded |
 | Single and overlapping Repair, Unicode install path, Uninstall declined and confirmed, module-load failure, launcher argument rejection, Apply/Reset/selection forwarding | **Pass** through the real `wscript.exe` launcher. | `c-0010` w1–w10; `c-0001` exact command strings |
 | One top-level Folder Icons menu (user requirement) | **Not implemented, not authorized here.** The Phase 0B two-entry layout stays the working fallback. ADR 019 is pending. | — |
@@ -343,6 +344,9 @@ scrollable picker; D: hybrid, one static entry with Reset, Repair and Choose Fol
 | Maintenance | low | high (Windows updates, two bitnesses) | medium | medium |
 | Confidence today | high (`c-0009`, M01) | low–medium until an Explorer proof | high technically; not the preferred UX | high technically |
 
+**(2026-11-17, later)** The "broker rebuild" entries for C and D in this table are superseded: the unchanged broker can
+carry a picker request through a reserved Apply identity. See "Option C design recommendation" below.
+
 **Assessment.**
 - **Native single menu.** Static registration cannot meet the requirement. A native single menu is plausible, since
   Explorer's own builder keeps long dynamic submenus, but only through a new in-process Explorer extension. That needs
@@ -504,6 +508,307 @@ Results:
 whether real wheel input reaches the hook. It may resume only after the security owner reviews and authorizes an exact
 implementation, and it matters only if the user still wants to pursue B. The P1 results above stand: wheel FAIL,
 on-screen scrolling PASS, keyboard arrows PASS, Icon 120 reachable.
+
+#### Option C design recommendation: one Folder Icons entry with an out-of-process icon picker (2026-11-17; documentation only; ADR 019 PENDING user approval)
+
+**Status and scope.**
+- This is a bounded design assessment. Nothing was implemented, compiled, installed, registered or run for it, and no
+  WatchGuard-sensitive experiment was made.
+- **ADR 019 stays pending the user's explicit architecture approval.** ADR 020 (complete uninstaller) stays deferred
+  to Phase 7.
+- Phase 0B (ADR 015, M01 PASS) stays the registered layout until a replacement passes manual acceptance.
+- **Inputs:**
+  - Source read on `070e9be`: `SelectionHandler/PortableFolderIcons.SelectionBroker.cs`,
+    `PortableFolderIcons.Selection.ps1`, `Invoke-PortableFolderIcons.ps1`, `Invoke-PortableFolderIcons.Hidden.vbs`,
+    `PortableFolderIcons.Integration.ps1` (`Get-PfiRegistryPlan`, `Register-PfiContextMenu`),
+    `PortableFolderIcons.Actions.ps1` (`Invoke-PfiBatchAction`, `Invoke-PfiApply`), `Read-PfiInstalledSettings`, and
+    the native-harness contract builder (`files/tests/Invoke-SelectionBrokerTests.ps1`, `SelectionBrokerHarness.cs`).
+  - Microsoft Learn, read 2026-11-17: [Creating Shortcut Menu Handlers](https://learn.microsoft.com/en-us/windows/win32/shell/context-menu-handlers)
+    (verb selection model, verb order, `Position`, ECF flags) and
+    [ShowWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-showwindow).
+
+**Target menu (user, 2026-11-17).**
+
+```text
+Folder Icons
+  Reset to Default
+  Repair Portable Folder Icons
+  Choose Folder Icon…
+```
+
+Complete removal belongs only to the future root `Uninstall-Portable-Folder-Icons.bat` (ADR 020). Until that passes
+acceptance, ADR 020 keeps the current Uninstall verb. The recommended interim menu therefore has it as a fourth entry,
+and Phase 7 removes it. This is a user decision, below.
+
+##### 1. Recommended architecture
+
+```text
+Explorer: "Choose Folder Icon…" static verb (DelegateExecute = existing broker CLSID, MultiSelectModel=Player)
+  -> existing SelectionBroker (unchanged binary): IInitializeCommand / IObjectWithSelection / IExecuteCommand
+       validates the reserved Apply identity, reads the whole selection in order,
+       writes state\requests\request-<token>.json, starts wscript.exe Hidden.vbs -SelectionToken -PayloadHash
+  -> Invoke-PortableFolderIcons.Hidden.vbs (unchanged): runs PowerShell 5.1 with window style 0 and waits
+  -> Invoke-PortableFolderIcons.ps1: reads and verifies the request, recognises the reserved Choose identity,
+       consumes (deletes) the request, then opens the picker in the same process (WPF, STA)
+         Cancel / Esc / close -> exit 2; nothing written
+         Choose               -> Invoke-PfiBatchAction -Action Apply -IconHash <chosen> -TargetPath <original order>
+                                 (existing sequential batch, per-target results, silent all-success,
+                                  existing result window on any failure or refresh warning)
+```
+
+- **Reserved Choose identity.**
+  - Verb key `PortableFolderIcons.Apply.0000`; icon ordinals start at 0001 (`Get-PfiRegistryPlan`), so 0000 is never
+    an icon.
+  - `PfiAction=Apply`.
+  - `PfiIconHash` is a fixed constant: the lowercase SHA-256 of the ASCII marker `PortableFolderIcons.ChooseFolderIcon.v1`,
+    which is `bce8cd3f1ac7cea4d3cc37cf970a32153de02ef6b83979ebd06a4fac2c998c7e`. The marker is not a valid ICO, so no
+    icon that Setup validates can have this hash short of a SHA-256 second preimage. Setup also refuses a manifest entry
+    with it (defence in depth).
+  - The constant lives in one runtime place, shared by registration and the dispatcher.
+- **The picker runs inside the dispatcher process.** One invocation is one process and one request. There is no
+  second request, no new inter-process channel, and the selection is never re-parsed from a command line.
+- **Picker layout registry.**
+  - The subcommand store holds Reset, Repair, Uninstall (interim) and Choose Folder Icon….
+  - There are no per-icon verbs, no `IconChoices` store and no overflow entries, so the 16-entry static budget no
+    longer constrains the menu and the 1596-icon registration ceiling does not apply.
+  - With 0 accepted icons, Choose is omitted, as the chooser is today (ADR 011).
+- **Layout setting and fallback.**
+  - `config.toml` gets `[settings] menu_layout = "static" | "picker"`, staged into `settings.json` as an optional
+    `menuLayout`.
+  - Keep `schemaVersion` at 1. The unchanged broker reads Developer Mode only when `schemaVersion == 1`
+    (`ReadDeveloperMode`). Its data contract has no `menuLayout` member, and .NET data-contract deserialization ignores
+    unknown members (expected; verify per the list below). `Read-PfiInstalledSettings` checks only `schemaVersion` and
+    `developerMode`.
+  - The default stays `static` (Phase 0B) until M05 passes.
+  - Setup and Repair register the configured layout through the unchanged exact-ownership `Register-PfiContextMenu`.
+    It already deletes every owned root and overflow key and rebuilds from the plan, so switching in either direction
+    leaves nothing behind.
+- **Developer Mode.** The broker starts PowerShell directly with a visible console. The picker behaves the same, and
+  the console is recorded, not failed (as in M03).
+
+**Why not a separate launcher without the broker.**
+- A static command verb (for example `wscript.exe … -Action Choose -TargetPath "%1"`) gets its items through
+  `CreateProcess` command lines.
+- Microsoft caps legacy verbs at 100 items even with `Player` (15 with `Document`). Only the COM methods
+  (`ExecuteCommand`, `DropTarget`) pass the whole selection as one item array, with no limit.
+- Several selected folders would therefore start several processes. Merging them into one picker needs a timing
+  heuristic with no way to know the selection size, which risks two pickers or a partial selection for a writing
+  operation. (One process per item is the documented model's consequence; it was not measured here, since M03's
+  optional process count was not recorded.)
+- DelegateExecute or DropTarget needs a COM server, and the existing broker is that server. **So the broker is the only
+  no-new-binary route that carries a multi-folder selection, and the analysis below shows it carries the picker request
+  unchanged.**
+
+**Picker technology (all inbox on Windows 10/11 with Windows PowerShell 5.1).**
+
+| Option | Wheel / keyboard / type-to-find | Icons, scale, accessibility | Security and deployment | Verdict |
+|---|---|---|---|---|
+| **WPF window in the dispatcher** (`Add-Type -AssemblyName PresentationFramework`, which loads an assembly and compiles nothing) | Native in `ListBox` (wheel, arrows, PageUp/PageDown, Home/End, `TextSearch`), plus a filter box | Vector layout, DPI-independent units, UI Automation built in, system colours for high contrast | No new binary. Already used by the dispatcher's batch result window and message boxes | **Recommended** |
+| WinForms `ListView` in the dispatcher | Native, including incremental search | `ImageList` icons; weaker scaling (blur at 150% unless handled); MSAA/UIA proxy | No new binary; the assembly is already loaded in `Actions.ps1` | Fallback if WPF fails R2 or R13 |
+| `Out-GridView -OutputMode Single` | Native filter box, wheel, keyboard | No icon previews; generic look | No new code beyond a call | Emergency fallback only |
+| HTA (`mshta.exe`) | Possible | IE engine | `mshta` is a common endpoint-security target; deprecated engine | Rejected |
+| Native user32 popup (`TrackPopupMenu` via `Add-Type`) | **No wheel** (P1 FAIL) | Native | P/Invoke compilation; W1 lessons | Rejected |
+| Shell "Change Icon" dialog (`PickIconDlg`) | Native | Needs one icon library file (a generated resource DLL/ICL) | New binary artifact plus P/Invoke | Rejected |
+| Compiled C# picker executable | Any | Any | New unsigned binary: WatchGuard classification and version coupling (X1) | Not now; revisit with Phase 4 |
+| Packaged Windows 11 menu or WinUI | n/a | n/a | Package identity and signing | Rejected (ADR 019) |
+
+**Picker behaviour (proposed).**
+- **Window:** a resizable "Choose Folder Icon" window. It names the targets: one folder's name, or "5 folders" with the
+  first few names. It is centred on the monitor under the pointer; the broker discards `SetPosition`, so the click
+  point is unknown.
+- **Search box:** at the top, with keyboard focus at start. It filters case-insensitively by substring (invariant
+  culture); Down moves into the list.
+- **List:** a virtualizing `ListBox`, one row per icon (icon about 32 px at 96 DPI, plus the label), ordered by the
+  same function as the menu (`Get-PfiOrderedMenuEntries`). Rows work better than a tile grid for keyboard use, screen
+  readers, type-to-find and virtualization; WPF has no inbox virtualizing wrap panel.
+- **Content:** every installed icon in the active manifest, public and personal alike; the picker does not care where an
+  icon came from.
+- **Decoding:** icons are decoded from the cached `<hash>.ico` with load-time caching and closed streams, so no cache
+  file stays locked. An icon that cannot be decoded shows a placeholder and can still be chosen; Apply already verifies
+  the cached file and its hash (`Invoke-PfiApply`).
+- **Labels** are plain text (`TextBlock`), never XAML or access-key text. Underscores are already replaced by
+  `ConvertTo-PfiMenuLabel`.
+- **Apply:** **Apply** (default button, Enter) or a double-click. **Cancel** (Esc) or closing the window writes nothing.
+  Apply stays disabled until an item is selected.
+- **Process:** STA is guarded; Windows PowerShell 5.1 is STA by default, and anything else fails with a dialog. No
+  `Add-Type -TypeDefinition`, P/Invoke, hooks, synthesized input or screen capture in the picker. The UI is built in
+  code (no external XAML file), with ASCII-only source (X3) and `Set-StrictMode -Version 2.0`.
+- **Test seam:** like the dialogs (`PFI_TEST_DIALOG_DIR`, production root excluded). Answers `choose:<hash>` and
+  `cancel` are recorded without showing the window, plus a separate window-visible mode for the launcher test.
+
+##### 2. Components likely to change
+
+| Component | Change |
+|---|---|
+| `scripts/Windows/PortableFolderIcons.Integration.ps1` | Picker layout in `Get-PfiRegistryPlan` (Choose verb with the reserved identity and a menu-order value if C0 shows one works; no icon store or overflow), layout selection, and the reserved-identity constant. Ownership roots unchanged. |
+| `scripts/Windows/PortableFolderIcons.Selection.ps1` | Mark a request whose hash is the reserved identity as Choose. Payload schema unchanged. |
+| `scripts/Windows/Invoke-PortableFolderIcons.ps1` | Choose branch: consume the request first, show the picker, exit 2 on cancel, then the existing batch path. |
+| New `scripts/Windows/PortableFolderIcons.Picker.ps1` | Picker window, filter and type-to-find logic as testable functions, and the seam. Loaded inside the guarded module boundary (ADR 021). |
+| `scripts/Windows/Install-PortableFolderIcons.ps1`, `PortableFolderIcons.Core.ps1` | Stage the new module, read `menu_layout`, write optional `menuLayout` (schema 1), and refuse the reserved hash as an icon. |
+| `scripts/Windows/PortableFolderIcons.Maintenance.ps1` | Repair re-registers the installed layout and names it in its result. |
+| `config.toml` | `[settings] menu_layout`, default `static`. |
+| Tests and gate | `files/tests/Invoke-Tests.ps1` (`c-0001`), `Test-PfiStaticCascadeMenu.ps1` (`c-0009`), a picker launcher check (new `c-0011` or `c-0010` cases), `c-0003` drift, and the `c-0004` runner (skip or seam the Choose verb). New `coverage.tsv` rows (picker, PFI-M05) and Feature Map registration **before coding** (Open Issue 21). |
+| Docs | `README.md` (with a new user-made screenshot; Open Issue 22), `MANUAL-GATES.md` M05, Changelog, Briefing. |
+| **Not changed** | Broker source, binaries, build manifest and CLSID; `Invoke-PortableFolderIcons.Hidden.vbs` (it already forwards the selection arguments); the request schema; Apply/Reset/notification code; `SelectionBrokerHarness.cs` (so the classified harness cache key is unchanged). |
+
+##### 3. Broker compatibility analysis
+
+| Question | Finding | Basis |
+|---|---|---|
+| Does the broker accept a Choose verb? | **Yes, as Apply.** It accepts `action == "Apply"` with a name matching `^PortableFolderIcons\.Apply\.[0-9]{4}$` and any 64-hex `PfiIconHash`. It never checks the hash against the manifest. | `ValidateCommand` |
+| What does it pass on? | `{schemaVersion 1, token, createdUtc, action, iconHash, paths}` in selection order, then `wscript.exe "<runtime>\Invoke-PortableFolderIcons.Hidden.vbs" -SelectionToken <t> -PayloadHash <h>` (or PowerShell directly in Developer Mode). It knows nothing about icons. | `WritePayload`, `LaunchDispatcher` |
+| Does the request reader accept it? | Yes: Apply with any 64-hex hash. The new logic sits after this validation. | `Read-PfiSelectionPayload` |
+| An old runtime and the new registry? | Safe. Every target fails with "The requested icon is not present in the active manifest", nothing is written, and the existing result window reports it. Setup stages runtime and registry together with rollback, so this needs a failed staging. | `Invoke-PfiApply` |
+| `settings.json` | The broker reads only `schemaVersion == 1` and `developerMode`. Keep schema 1 and add an optional member. | `ReadDeveloperMode` |
+| Native harness (`c-0002`) | Contracts are generated from the registry plan as data. The reserved verb passes `InitializeAndValidate`, and `applyCount > 0` still holds with only the Choose verb. Harness source, cache key and classification state are unchanged, and `c-0002` stays BLOCKED_BY_ENDPOINT_SECURITY. | `Invoke-SelectionBrokerTests.ps1` contract builder; `CheckContracts` |
+| Installed COM (`c-0004`, opt-in) | It invokes registered verbs on the live installation. Its runner must skip the Choose verb or answer through a seam, or it would open a real picker. Runner change only. | `InvokeInstalled` |
+| **Menu order** | **Not available unchanged.** The Shell orders cascade verbs by key name (`Integration.ps1` chooser comment; `c-0009`). Every broker-accepted Apply key (`PortableFolderIcons.…`) sorts before the fixed Reset name `Utility_0100_Reset`, so Choose comes **first**. Microsoft documents `Position=Top|Bottom` and a `Shell` default-value order list for static verbs; neither is measured inside an `ExtendedSubCommandsKey` cascade, and the list also makes its first entry the default verb. | Docs above; unmeasured (milestone C0) |
+| **Foreground and keyboard focus** | **Unknown.** The broker passes no foreground right to the launcher (no `AllowSetForegroundWindow`), and whether Explorer grants one to the DelegateExecute server is not established. A WPF window can be brought on top (temporary `Topmost`, `Activate`), but if Windows withholds the foreground, typing goes to Explorer until the user clicks the picker. M03 shows that maintenance dialogs started from a command verb reach the front; the broker path is a different chain. | Broker source; M05 |
+| Position of the window | The broker ignores `SetPosition`, so the picker cannot open at the click point. | `SetPosition` returns 0 and discards the point |
+
+**Conclusion: a broker rebuild is not required** for function, multi-folder selection, cancellation, safety or
+compatibility. It becomes justified only if:
+- (a) the user requires the exact order Reset, Repair, Choose and milestone C0 shows that neither documented ordering
+  mechanism works inside the cascade; or
+- (b) M05 shows that the picker cannot get keyboard focus acceptably.
+
+A rebuild would then add a first-class `Choose` action (for example `Utility_0400_Choose` with no hash) and, if needed,
+`AllowSetForegroundWindow` for the launched launcher. Its cost:
+- new x64/x86 broker hashes, which WatchGuard must classify (X1);
+- the coordinated 0.2.0 version advance ("Branch, version and checkpoint policy");
+- new native-harness builds, because the cache key includes broker bytes, which also need classification;
+- an x86/x64 ABI recheck.
+
+##### 4. Security and deployment risks
+
+| # | Risk | Assessment and mitigation |
+|---|---|---|
+| R1 | Endpoint security (WatchGuard) | No new executable, DLL, hook, service, scheduled task or injected code. The picker has none of the elements recorded in the W1 incident (message hook, synthesized key or wheel messages, screen capture) and compiles nothing. The same dispatcher process already compiles small `SHChangeNotify` P/Invoke types during Apply (pre-existing since v0.1.0). New `.ps1` content is still new to the scanner (static scan or AMSI). So the first run happens against a disposable install copy in the gate and is itself recorded as an observation. On any detection: stop and report; never rename, encode, move or request an exclusion. **Dependency:** none for the unchanged-broker route. A rebuild route needs classification first. |
+| R2 | Picker window stays hidden | **Documented:** "nCmdShow … is ignored the first time an application calls ShowWindow, if the program that launched the application provides a STARTUPINFO structure". The launcher starts PowerShell with window style 0 (SW_HIDE), so the first `ShowWindow` of a WPF top-level window may be turned into a hide. Mitigate in WPF only, and prove it through the real launcher with a UI Automation observer (C1). The same rule may already affect the normal-mode batch result window (Open Issue 27, unverified). |
+| R3 | Foreground and keyboard focus | See the broker table. Measured in M05. Fallbacks: accept click-to-focus, or rebuild (a above). |
+| R4 | Time to window | The chain wscript → PowerShell → module load → WPF assembly load is cold-start bound. Show the window before decoding every icon and decode only visible rows. Measure time-to-window (Phase 1 method); no guessed target. |
+| R5 | Mixed versions during update | See the broker table: an old runtime fails safely and writes nothing. Setup's staging rollback covers partial installs. |
+| R6 | Request lifetime | The request is consumed before the picker opens, so no request file outlives a long-open picker and the 15-minute age check is unaffected. |
+| R7 | Concurrency | Two pickers from two invocations are independent and each applies only its own selection. No global lock is added, and per-target coordination stays a Phase 2 concern. The maintenance mutex is not involved. |
+| R8 | Untrusted labels and files | Labels come from file names, including personal ICOs, and are rendered only as plain text. Cached icons are opened read-only with closed streams. Integrity is still enforced at Apply. |
+| R9 | PowerShell 5.1 / STA / encoding | STA guard; ASCII-only source; strict mode 2.0; no PowerShell 7 features; no network. |
+| R10 | VBScript deprecation | Unchanged, product-wide (ADR 022). |
+| R11 | Privileges | HKCU only, no elevation, no Explorer restart, no cache reset, no hook or injection, no new service. |
+| R12 | Command ownership | One more verb under the already-owned subcommand root, reusing the broker CLSID. Ownership checks, exact cleanup and Uninstall are unchanged. |
+| R13 | Accessibility and scaling | WPF exposes UI Automation names (set `AutomationProperties.Name` to the label). High contrast via system colours. Process DPI awareness follows `powershell.exe` and WPF defaults, so mixed-DPI monitors may scale bitmaps. The Windows "Text size" setting may not apply to WPF on .NET Framework. All measured in M05. |
+
+##### 5. Verification requirements (automated, before any manual gate)
+
+1. **Registry plan (`c-0001`):**
+   - The picker layout at 0, 1, 12, 21, 120 and 2000 icons: Choose present only with icons; no icon verbs, no
+     `IconChoices` store, no overflow keys.
+   - The reserved identity is exact.
+   - Switching `static → picker → static` leaves exactly the plan, and unowned or lookalike keys are untouched.
+   - Setup refuses the reserved hash as an icon.
+2. **Shell-built menu (`c-0009`, isolated GUID test keys, nothing invoked):**
+   - The picker layout renders exactly one top-level entry with the expected children.
+   - Milestone C0 measurement: whether `Position=Bottom` or a `Shell` default-value order list reorders a verb inside an
+     `ExtendedSubCommandsKey` cascade, and whether the list makes an entry the default.
+3. **Request and dispatcher:**
+   - The reserved identity routes to Choose, and the request is consumed before the picker.
+   - Cancel gives exit 2 and an unchanged fixture tree (hashes of `desktop.ini` files, attributes and resources before
+     and after).
+   - Choose applies with the original order and duplicate occurrences.
+   - A simulated old runtime fails without writes.
+4. **Picker logic through the seam:** filtering and type-to-find, ordering equal to the menu order function,
+   placeholder for an undecodable icon, plain-text labels, and the STA guard.
+5. **Through the real launcher (disposable install copy, like `c-0010`):**
+   - Real `wscript.exe` → dispatcher → picker. A UI Automation observer confirms the window becomes **visible** (R2),
+     and records time-to-window.
+   - The window is closed through UI Automation patterns only, with no synthesized keyboard or mouse input.
+   - No console or Windows Terminal window appears.
+6. **Identity guard:** broker x64 `88a113f1…`, x86 `134832fd…` and source `4dc9ec37…` unchanged, and
+   `SelectionBrokerHarness.cs` unchanged, so the harness cache key is unchanged.
+7. **`c-0004` runner** skips or seams the Choose verb.
+8. **Full gate** once per completed milestone. It is expected to be BLOCKED, not PASS, while `c-0002` stays
+   BLOCKED_BY_ENDPOINT_SECURITY. Agent review, then housekeeping.
+
+##### 6. Manual Windows Explorer acceptance checklist (proposed M05; runnable only after implementation)
+
+On this PC, with disposable folders under `outputs/manual/`; record the resolution, scaling, Developer Mode and Windows
+build:
+1. Set `menu_layout = "picker"` and double-click `Setup_and_Run-Portable-Folder-Icons.bat`. Setup reports the icon count.
+2. Right-click a folder, then **Show more options**:
+   - exactly **one** Folder Icons entry, and no `Folder Icons (…)` overflow entry;
+   - its entries and their order recorded: Reset to Default, Repair Portable Folder Icons, (interim) Uninstall, Choose
+     Folder Icon…, or Choose first if the order decision accepted that.
+3. One folder, **Choose Folder Icon…**:
+   - the picker appears in front of Explorer (record time-to-window);
+   - the search box has keyboard focus **without a click** (record yes/no);
+   - no PowerShell or Windows Terminal window.
+4. **In the picker:**
+   - The mouse wheel scrolls the list.
+   - Up/Down, PageUp/PageDown and Home/End move the selection.
+   - Typing a label's first letters jumps to it.
+   - The search box filters, including a personal icon such as GitHub.
+   - Every installed icon is present: the count equals Setup's (21 today), and both public and personal icons appear.
+5. **Enter** applies the selected icon, and the folder shows it; repeat with a **double-click** on another icon.
+6. **Esc**, **Cancel** and the window close button each change nothing (the folder keeps its icon).
+7. **Five folders**, Choose once:
+   - exactly one picker, naming 5 folders;
+   - one choice applies to all five;
+   - no result dialog on success.
+8. **Mixed selection:**
+   - Select a folder whose name has Unicode, `&` and an apostrophe; it is applied.
+   - Optionally add a folder that Apply rejects, if one is easy to select, for example on a network share (UNC is
+     unsupported). Expected: the others are applied, and one visible result window lists the rejection. Otherwise skip
+     this part and record that.
+9. **Reset to Default** and **Repair** still work from the same menu. Repair's result names the picker layout and gives
+   one dialog.
+10. **Accessibility:**
+    - at 150% scaling (and on a second monitor, if available) the window is legible and icons are sharp or acceptably
+      scaled;
+    - high contrast is readable;
+    - Narrator reads each label and the buttons.
+11. **Developer Mode on:** the picker works, and a console window is recorded, not failed.
+12. **Rollback:** set `menu_layout = "static"`, then rerun Setup. The Phase 0B two-entry menu returns exactly (M01
+    steps 3–7), with no leftover Choose verb.
+13. No Explorer hang, restart or desktop flicker, and **no WatchGuard notification**. Record any detection as
+    BLOCKED_BY_ENDPOINT_SECURITY and stop.
+
+PASS needs steps 2–10, 12 and 13; step 11 is recorded. Step 3's focus result decides between click-to-focus and the rebuild route; it does
+not fail the gate on its own unless the user requires it.
+
+##### 7. Rollback approach
+
+- **Before acceptance:** the default `menu_layout` stays `static`. A picker install is a deliberate opt-in, and setting
+  `static` and rerunning Setup (or Repair) restores the Phase 0B menu through the same exact-ownership registration.
+- **After the default changes:** the same switch stays available as a supported fallback at least through v0.2.0
+  acceptance. Retiring it is a later decision.
+- **No binary rollback is needed,** because the broker and its registration identity are unchanged.
+- **Folder data:** the picker writes nothing before a choice. Apply and Reset are the existing implementations, so
+  already customized folders are unaffected by switching layouts.
+- **Git:** each milestone is a separate commit on `feature/v0.2.0`, so a revert commit undoes it without rewriting
+  history.
+- **Endpoint security:** if WatchGuard flags the picker module, the static layout is still the default, so installed
+  users keep a working menu. Stop and report.
+
+##### 8. Proposed bounded milestones (each stops for review; none starts without explicit authorization)
+
+| Milestone | Scope | Exit |
+|---|---|---|
+| **C0 — order measurement** (optional; needs approval as a new isolated probe) | Extend `c-0009`'s isolated Shell-builder check to measure `Position` and `Shell` default-value ordering inside a cascade, using GUID test keys only. No product change, no new executable. | Recorded answer to the menu-order question; the user chooses the order or the rebuild route. |
+| **C1 — picker core** | Feature Map and coverage registration first. Picker module, dispatcher Choose branch, request marking and seam. Tests 3–6 including the real-launcher visibility test (R2). No registry or layout change, so the picker is reachable only from gate fixtures. | Focused checks and full gate (BLOCKED by `c-0002` only); R2 answered; time-to-window recorded. |
+| **C2 — picker layout behind the setting** | `menu_layout` in config and settings, `Get-PfiRegistryPlan` picker layout, Setup and Repair, `c-0009` picker cases, `c-0004` runner, docs, M05 in `MANUAL-GATES.md`. Default stays `static`. | Full gate; the user installs with `picker` and runs M05. |
+| **C3 — default switch** (after M05 PASS) | Default `picker`; README and screenshot; Changelog; M01 recheck of the `static` fallback. | Full gate; user review. |
+| C-R — broker rebuild (conditional) | Only if C0 or M05 requires it: first-class `Choose` action and/or a foreground grant. Needs separate approval, the endpoint-security decision, the coordinated version advance and new harness classification. | Its own plan and gate. |
+
+Phase 7 later removes Uninstall from the menu together with the root uninstaller (ADR 020).
+
+**Decisions for the user.**
+1. Approve ADR 019 option C, and the unchanged-broker route with a reserved Apply identity (recommended), or ask for the
+   rebuild route from the start.
+2. Menu order: accept Choose Folder Icon… first if C0 finds no working ordering mechanism, or require the exact order
+   (rebuild).
+3. Keep the interim Uninstall entry in the single menu until Phase 7 (recommended, per ADR 020), or drop it earlier,
+   leaving no Explorer removal path until Phase 7.
+4. Keep `menu_layout = "static"` as a supported fallback after acceptance (recommended through v0.2.0).
+5. Whether click-to-focus is acceptable if M05 shows the picker cannot take keyboard focus by itself.
 
 ## Redesign Phase 1 — Instrumentation and baseline
 

@@ -46,7 +46,19 @@ Record each of the four layers separately: persisted state (automation), fresh-p
 
 ## M03 — Repair from the menu (coverage `PFI-M03`)
 
-Status: **PENDING retest after Phase 0A.1** (2026-11-17).
+Status: **PASS** (user retest after Phase 0A.1, 2026-11-17). This is Phase 0A / Phase 0A.1 Repair manual acceptance
+only. It is not an automated gate result: the full gate stays BLOCKED by `c-0002` (BLOCKED_BY_ENDPOINT_SECURITY), and
+`c-0004` is NOT RUN.
+
+Retest (user, 2026-11-17, Phase 0A.1 at `070e9be`, Developer Mode off; screenshots of both results supplied by the
+user; record in `outputs/manual/2026-11-17-results.md`): **PASS**.
+- Setup completed successfully: 21 ICO files discovered, accepted and reused.
+- One folder and five folders each gave exactly one "Repair completed" dialog: runtime and selection broker valid,
+  cached icons verified 21 of 21, Explorer menu recreated with 21 icons, Developer Mode off.
+- No error dialog, and no PowerShell, Windows Terminal or command-prompt window. Both dialogs appeared in front of
+  Explorer, and the user reported no Explorer problem.
+- Not expressly confirmed in this retest (recorded, not failed): a fresh Apply afterwards (step 4), the optional
+  declined Uninstall (step 5), and the optional process count (step 3).
 
 First run (user, 2026-11-17, Phase 0A at `3170d8f`, Developer Mode off): **provisional PASS for Repair's function,
 FAIL for window visibility.**
@@ -113,6 +125,12 @@ the dialog comes to the front. Do not corrupt the live installation to test fail
 
 With three disposable folders selected, choose **Uninstall Portable Folder Icons** and count the confirmation
 dialogs. Answer **No** to every prompt. Nothing is uninstalled.
+
+## M05 — single Folder Icons entry with the icon picker (proposed; not runnable)
+
+Proposed for ADR 019 option C, which is **not approved or implemented**. The draft checklist is in the active plan,
+section "Option C design recommendation". It becomes a runnable gate here only after the user approves option C and
+the picker layout is implemented.
 
 ## P1 and P1-W — native popup and mouse wheel (feasibility probes, not acceptance gates; ADR 019)
 

@@ -1,6 +1,70 @@
 # Portable Folder Icons — Handoff
 
-## Snapshot — 2026-11-17 (Phase 0A.1 windowless maintenance launch) — Claude Code (current)
+## Snapshot — 2026-11-17 (M03 PASS closeout; option C design, documentation only) — Claude Code (current)
+
+- **Machine and branch:** the original Windows 11 PC (25H2, build 26200, Windows PowerShell 5.1), branch
+  `feature/v0.2.0`.
+- **SHAs:**
+  - Start: `070e9bef705b52f12f8f4fcc2cb7916deafd2162`, equal to `origin/feature/v0.2.0`.
+  - End: one narrow documentation and manual-acceptance commit on top. Read it with `git log -1` and compare it with
+    `git ls-remote origin feature/v0.2.0`.
+  - No merge, tag, release, `main` change or version bump.
+- **M03 PASS** (user, 2026-11-17, Phase 0A.1 at `070e9be`, Developer Mode off; the user's screenshots of both results
+  are in the conversation, not the repository):
+  - Setup: 21 ICOs discovered, accepted and reused.
+  - One folder and five folders each gave exactly one "Repair completed" dialog, in front of Explorer. Each showed
+    runtime and broker valid, 21 of 21 icons verified, and the menu recreated with 21 icons.
+  - No error dialog; no PowerShell, Windows Terminal or command-prompt window; no Explorer problem.
+  - **Scope:** Phase 0A / Phase 0A.1 Repair manual acceptance only. Not expressly confirmed in this retest: a fresh
+    Apply, the optional declined Uninstall, and the optional process count.
+  - **Still open:** M02 (Reset rendering) and M04 (Uninstall prompts) remain **pending**. `c-0002` remains
+    BLOCKED_BY_ENDPOINT_SECURITY and `c-0004` NOT RUN, so the overall automated gate is still BLOCKED, not PASS.
+  - Phase 0B's two-entry menu is the accepted working fallback, not the final layout.
+  - **Recorded in:** `MANUAL-GATES.md`, ADR 021 and 022 statuses, the plan (D3 row and the Phase 0A and 0A.1
+    sections), the Changelog, and `outputs/manual/2026-11-17-results.md` (ignored; RETAIN.md updated).
+- **Option C design (documentation only; plan section "Option C design recommendation"; ADR 019 update):**
+  - **Recommended:** the existing broker, unchanged, carries a "Choose Folder Icon…" verb through a reserved Apply
+    identity: key `PortableFolderIcons.Apply.0000` and a fixed marker hash `bce8cd3f…`.
+  - The dispatcher consumes the request and shows a WPF picker in the same process. A choice is applied through the
+    existing batch Apply; cancelling writes nothing.
+  - A `menu_layout` setting keeps the Phase 0B layout as the default until manual gate M05 passes.
+  - **A broker rebuild is not required.** It is justified only by exact menu order (Choose sorts first by key name
+    unless `Position` or default-value ordering works inside the cascade: milestone C0) or by keyboard focus (M05).
+  - Nothing was implemented, compiled, installed, registered or run for it.
+  - **ADR 019 is still pending the user's approval. ADR 020 stays deferred to Phase 7.**
+- **Not changed:** product code, broker binaries and source, registry, installation, `config.toml`, `coverage.tsv`,
+  `checks.tsv`.
+  - The uncommitted `Setup_and_Run-Portable-Folder-Icons.bat` banner edit (v0.1.1 → v0.2.0) was already in the working
+    tree when this session started. It is not this session's work and was left unstaged; the version policy advances
+    all version metadata together.
+  - Personal ICOs and `files/extra-ICO-files-for-use/` are untracked and untouched.
+- **Last verification** (2026-11-17, Windows PowerShell 5.1, on `070e9be` plus this session's uncommitted documentation
+  and the pre-existing banner edit; documentation only, so no full gate):
+  - Focused gate `20261117T170856Z-79ec62`: **PASS**, `c-0005` (only the ten tracked colour ICOs; no personal ICO
+    staged).
+  - Focused gate `20261117T170914Z-316e12`: **PASS**, `c-0006`. Inside it, `scripts/verify.ps1` reported 657 PASS
+    lines and 0 FAIL, including docs, the security scans and `git diff --check`, plus suite 580 passed, 0 failed,
+    1 blocked. Its own result is BLOCKED only because the compiled harness launch is withheld (owned by `c-0002`;
+    0 harness launches).
+  - `git diff --check`: clean before staging.
+  - **Not run:** the full gate, `c-0002` (BLOCKED_BY_ENDPOINT_SECURITY) and `c-0004` (opt-in). The last full gate,
+    `20261117T162252Z-a40c50`, stays the reference: BLOCKED, no FAIL.
+  - Both run folders were removed after this record. The only later edits are this record itself.
+- **Security:** no new executable, hook, DLL, registration or experiment. The W1 incident (Open Issue 25) and the
+  harness classification (Open Issue 16) are unchanged.
+- **Exact next action:** stop for user review. The user decides ADR 019 and the five option C decisions in the plan
+  section. Do not implement option C, change the production menu, rebuild the broker, or start another functional phase
+  until explicitly authorized.
+  - If option C is approved, the first milestone is C0 (optional order measurement) or C1 (picker core, registered in
+    `coverage.tsv` and the Feature Map first).
+- **Retained evidence (unchanged, each with a RETAIN.md):**
+  - `outputs/experiment-single-menu/` (W1 incident; ADR 019 still pending)
+  - `outputs/manual/` (M02 and M04 pending)
+  - `outputs/retained-phase0-preedit/` (awaiting the user's confirmation)
+  - `files/backups/*`
+  - `cache/native-harness/`
+
+## Snapshot — 2026-11-17 (Phase 0A.1 windowless maintenance launch) — Claude Code (superseded by the snapshot above)
 
 - **Machine and branch:**
   - The original Windows 11 PC: 25H2 build 26200, Windows PowerShell 5.1.
@@ -772,7 +836,7 @@ cache; it is forbidden here and was not implemented.
 | 8 | Major | SelectionBroker native initialization | Fixed 16-byte VARIANT did not represent the native x64 property-bag buffer size. | Fixed locally: native union layout; x64/x86 ABI regression and installed x64 COM initialization pass | Codex |
 | 9 | Blocker (environment) | Verification / endpoint security | 2026-11-16: WatchGuard Endpoint Security ("Untrusted program blocked", publisher None) blocked `files/test-logs/selection-focused-01d92367b8af45ae9ef29398ed41c34a/SelectionBrokerHarness.x64.exe` (SHA-256 `35482483f917106c82d485a0e360aa1846407adcbec162f52b19dd1103fd4bf5`). It compiled successfully; only execution was denied. Launch attempts, all before the user's stop instruction: (a) `Invoke-SelectionBrokerTests.ps1` via powershell.exe; (b) direct retry from pwsh.exe; (c) a byte-identical copy in the ignored Phase 0 evidence folder from pwsh.exe (a diagnostic; it is a relocation and must not be repeated). x86 never started. The in-suite harness had run (358 passed) about 3 minutes earlier. Installed and repository broker EXEs started normally (exit 64 by design). Classified BLOCKED_BY_ENDPOINT_SECURITY; not evidence of regression. | Open: needs an authorized security decision; gate withholds launches by default | User / Claude |
 | 10 | Baseline | Working tree | `LICENSE` deleted and `LICENSE.LICENSE` untracked with identical text (CRLF only); `scripts/verify.ps1` fails two checks (gate BASELINE B-001/B-002). | Fixed 2026-11-16: renamed back to `LICENSE` (= `HEAD:LICENSE`, no diff); rows retired; run `20261116T165247Z-85283c` | Claude |
-| 11 | Major | Repair (D3) | Failures give no Setup_and_Run guidance; one bad cached icon blocks all re-registration; missing module fails invisibly; concurrent re-registration races (isolated reproduction). | Open: plan Phase 0A (recommended next) | Claude |
+| 11 | Major | Repair (D3) | Failures give no Setup_and_Run guidance; one bad cached icon blocks all re-registration; missing module fails invisibly; concurrent re-registration races (isolated reproduction). | Fixed 2026-11-17 by Phase 0A (ADR 021) and Phase 0A.1 (ADR 022); **M03 PASS** (user retest 2026-11-17). Residuals in Open Issue 26 | Claude |
 | 12 | Critical | Chooser (D1) and missing utilities (D5) | M01 FAIL: only 16 entries render per top-level static cascade (Choose Folder Icon + 15 icons); icons 16–21 and Reset/Repair/Uninstall are dropped. Registry correct. | Fixed 2026-11-16 (Phase 0B): utilities first, 12-icon chooser, alphabetical-range overflow entries; Shell-built menu PASS (`c-0009`); **M01 PASS** (user). Final single-entry layout still preferred (design open) | User / Claude |
 | 16 | Blocker (environment) | Verification / WatchGuard | Harness rebuilt per run → new hash each time → each build needs classification (`b2eaad08…` blocked after `35482483…` was approved). | Project side fixed 2026-11-16 (ADR 014): build-once cache; x64 `0a71577b…`, x86 `4f589ac4…` stable and never launched. `35482483…` is input-equivalent to the x64 build (timestamp/MVID only) but not adopted. Open: security owner decision | Claude |
 | 17 | Major (packaging) | `.gitattributes` | Broker `.cs` had only `text=auto`; a fresh clone with `core.autocrlf=true` writes CRLF, so setup's source-hash check rejects the broker. Never shipped (broker not yet committed). | Fixed 2026-11-16: `*.cs text eol=lf`; regression check in `scripts/verify.ps1`; reproduced and verified with a throwaway index | Claude |
@@ -781,10 +845,11 @@ cache; it is forbidden here and was not implemented.
 | 20 | Minor (tooling) | `.claude/CLAUDE.md` (gitignored workspace template) | Its `@AGENTS.md` and `@AI-WORKSPACE.md` imports resolve relative to `.claude/` (Claude Code docs), where neither file exists; only its fallback sentence points to the root files. A local pointer to the housekeeping rule was added. | Fixed 2026-11-16 (ADR 018): tracked root `CLAUDE.md` imports `@AGENTS.md`; verifier check. Local file untouched. Confirmed 2026-11-17: a fresh session loaded `CLAUDE.md` and `AGENTS.md` at startup | Claude |
 | 21 | Minor (docs) | `md-instructions/Feature-Map.md` | `AGENTS.md` and `CLAUDE.md` notes require registering features in `md-instructions/Feature-Map.md`, which has never existed in this repository; the gate's `coverage.tsv` is the enforced register (Phase 0B registered `PFI-002`/`PFI-014` there before coding). | Open: create the map from the workspace structure in a docs task | Claude |
 | 22 | Minor (docs) | `README.md`, `files/readme-assets/folder-icons-submenu.png` | The README screenshot shows the pre-Phase-0B submenu order, and the README does not yet mention overflow entries for more than 12 personal icons (the ten shipped colours all fit the chooser, so the usage text stays true). | Open: Phase 9 docs, with a new user-made screenshot | Claude |
-| 23 | Major (UX) | Explorer menu | User requirement 2026-11-17: one top-level Folder Icons entry with one complete, wheel- and keyboard-scrollable icon list (native submenu preferred). Static registration cannot do it (16-entry cap); a native single submenu needs an in-process Explorer extension (ADR 019). P1 (user): the native popup does not scroll with the wheel; arrows and keyboard work. W1: the wheel works only through a menu hook, which in Explorer means in-process code plus a hook. | Open: user decision. Claude recommends C (picker launched from Choose Folder Icon…), or D; A (Phase 0B) stays the fallback | User / Claude |
+| 23 | Major (UX) | Explorer menu | User requirement 2026-11-17: one top-level Folder Icons entry with one complete, wheel- and keyboard-scrollable icon list (native submenu preferred). Static registration cannot do it (16-entry cap); a native single submenu needs an in-process Explorer extension (ADR 019). P1 (user): the native popup does not scroll with the wheel; arrows and keyboard work. W1: the wheel works only through a menu hook, which in Explorer means in-process code plus a hook. | Open: user decision. Claude recommends C (picker launched from Choose Folder Icon…), or D; A (Phase 0B) stays the fallback. 2026-11-17: C design documented (plan section "Option C design recommendation"). The unchanged broker can carry it through a reserved Apply identity; a rebuild is needed only for exact menu order or keyboard focus | User / Claude |
 | 25 | Security incident | `outputs/experiment-single-menu/Test-MenuWheelFeasibility.ps1` (ignored experiment) | 2026-11-17 about 08:29: WatchGuard Endpoint Security 360 deleted the W1 wheel-experiment script, detection "Malware or potentially unwanted program (PUP)", action Deleted (local quarantine record `7b16cb86-a9e5-4b25-ad38-861fa7b478c2`, 08:29:36). The script used `Add-Type`, a thread-local `WH_MSGFILTER` hook, posted key and wheel messages, and a screen capture of its own menu. The trigger is unconfirmed. No process or hook remains, and Explorer and production were untouched. | BLOCKED_BY_ENDPOINT_SECURITY. Do not recreate or continue. Open: security owner reviews the console incident; any future hook experiment needs their authorization of an exact implementation | User / Claude |
 | 24 | Major (feature) | Complete removal | User requirement 2026-11-17: root `Uninstall-Portable-Folder-Icons.bat` as the only complete-uninstall entry point; Uninstall leaves the Explorer menu (ADR 020). | Open: plan Phase 7 (reconciled); register in the Feature Map (Open Issue 21) before coding | User |
 | 26 | Minor (reliability) | `Install-PortableFolderIcons.ps1`; static Repair/Uninstall verbs | Phase 0A gates left open (ADR 021). (a) Setup registers the menu without taking the per-user maintenance lock, so Setup running at the same moment as an Explorer Repair is not serialized. (b) If the installed dispatcher script itself is missing, the static `powershell.exe -WindowStyle Hidden -File <dispatcher>` command has no product code to show a dialog. **2026-11-17 (Phase 0A.1, ADR 022): (b) fixed for normal mode**, where the launcher shows a guided dialog. Still silent: Developer Mode's unchanged direct command, and a dispatcher that exists but cannot be parsed (it exits 1, the same as a reported failure). | Open: (a) a later phase that touches setup; (b) residual with the final menu architecture (ADR 019) | Claude |
+| 27 | Minor (verification) | `Invoke-PortableFolderIcons.ps1` batch result window | **UNVERIFIED hypothesis** (found during the option C analysis, 2026-11-17). Normal-mode Apply/Reset run PowerShell started hidden (broker → wscript → window style 0). Microsoft documents that a process's first `ShowWindow` call uses the launcher's STARTUPINFO, so the WPF result window shown on a failure might stay hidden while its modal `ShowDialog` keeps the process waiting. No evidence either way: the maintenance dialogs are message boxes, and M03 tested only those. | Open: check in option C milestone C1 (UI Automation observer through the real launcher), or in an earlier task if the user asks | Claude |
 | 13 | Major | Reset (D2) | Not reproduced at persisted-state or fresh-process Shell layers; rendering unverified. | Open: manual M02, then plan Phase 2 | User |
 | 14 | Major | Actions INI read | ANSI `desktop.ini` non-ASCII text corrupted by Apply/Reset (read as UTF-8, rewritten UTF-16LE). | Open: plan Phase 2 | Claude |
 | 15 | Minor | Reset attributes | Reset does not restore pre-existing folder ReadOnly; removes third-party icon fields. | Open: plan Phase 6 | Claude |
@@ -792,6 +857,19 @@ cache; it is forbidden here and was not implemented.
 ---
 
 ## Work Log (newest first)
+
+- 2026-11-17 (M03 closeout and option C design) — documentation only, from start SHA `070e9be`.
+  - **M03:** the user's retest after Phase 0A.1 was recorded as PASS (see the snapshot). The status changed to PASS in
+    `MANUAL-GATES.md`, ADR 021/022, the plan and the Changelog. M02 and M04 remain pending.
+  - **Option C:** read-only source analysis of the broker, request reader, dispatcher, launcher, registry plan and
+    harness contract builder, plus Microsoft Learn (verb selection model and ordering; `ShowWindow`). The result is the
+    plan section "Option C design recommendation" and the ADR 019 update.
+  - **Findings:**
+    - A rebuild is not required; a reserved Apply identity passes the unchanged broker and harness contracts.
+    - The menu order is the main limit of that route.
+    - Open Issue 27 (an unverified first-`ShowWindow` risk for hidden-started WPF windows) was added.
+  - **Commands:** nothing was compiled, installed, registered or run except reads, one SHA-256 of a marker string, and
+    the focused checks recorded under **Last verification**.
 
 - 2026-11-17 (Phase 0A.1) — Windowless maintenance launch (ADR 022), from start SHA `3170d8f`.
   - **Diagnosis:** read-only check of `HKCU\Console\%%Startup`, plus three disposable probes under the ignored
@@ -1217,6 +1295,16 @@ cache; it is forbidden here and was not implemented.
 ---
 
 ## Session Sync Log (newest first)
+
+### 2026-11-17 — Current Windows workspace — M03 closeout and option C design (Claude Code)
+
+- Started at `070e9be`, equal to `origin/feature/v0.2.0`. Made one documentation and manual-acceptance commit on top and
+  pushed it normally; read the SHA with `git log -1`. No merge, tag, release, `main` change or version bump.
+- **Committed:** `md-instructions/Handoff.md`, `Decisions.md`, `Changelog.md`, the plan, and
+  `files/dev-work/verification-gate/MANUAL-GATES.md`.
+- **Left uncommitted:**
+  - the pre-existing `Setup_and_Run-Portable-Folder-Icons.bat` banner edit (not this session's work);
+  - the personal ICOs and `files/extra-ICO-files-for-use/`, untracked and untouched.
 
 ### 2026-11-17 — Current Windows workspace — Phase 0A.1 windowless maintenance launch (Claude Code)
 

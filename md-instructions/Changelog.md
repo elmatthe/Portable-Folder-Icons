@@ -2,7 +2,7 @@
 
 ## v0.1.1 — Unreleased
 
-### Phase 0A.1: windowless Repair and Uninstall — 2026-11-17 (`feature/v0.2.0`; version metadata still 0.1.1; manual M03 retest pending)
+### Phase 0A.1: windowless Repair and Uninstall — 2026-11-17 (`feature/v0.2.0`; version metadata still 0.1.1; manual M03 retest passed 2026-11-17)
 
 - **Repair and Uninstall no longer open a PowerShell window.** On Windows 11,
   where Windows Terminal is the default terminal, choosing Repair (or
@@ -19,7 +19,7 @@
 - Developer Mode keeps its previous direct PowerShell command, so a terminal
   window can still appear there.
 
-### Phase 0A: Repair reliability — 2026-11-17 (`feature/v0.2.0`; version metadata still 0.1.1; manual M03 pending)
+### Phase 0A: Repair reliability — 2026-11-17 (`feature/v0.2.0`; version metadata still 0.1.1; manual M03 passed after Phase 0A.1)
 
 - **Repair and Uninstall always explain a failure.** If an installed runtime
   file is missing or cannot be loaded, one error dialog names the file, says
@@ -47,8 +47,9 @@
   product is being or has been uninstalled and changes nothing. A second
   confirmed Uninstall says the earlier one already removed it. Uninstall's
   prompts, its cached-icon choice and what it removes are unchanged.
-- Explorer behaviour with a real multi-folder selection (dialog count, console
-  flash) is manual check M03, still pending.
+- Explorer behaviour with a real multi-folder selection was confirmed by manual
+  check M03 on 2026-11-17 after Phase 0A.1: one result dialog for one folder
+  and for five folders, shown in front of Explorer, with no terminal window.
 
 ### Phase 0B: accessible folder icon menus — 2026-11-16 (`feature/v0.2.0`; version metadata still 0.1.1)
 

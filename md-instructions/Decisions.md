@@ -7,8 +7,11 @@ entries appear first.
 
 ## 022 — Phase 0A.1: normal-mode Repair and Uninstall start through the windowless wscript launcher — 2026-11-17 — Claude
 
-**Status:** Implemented on `feature/v0.2.0` (automated `c-0001`, `c-0010`; coverage PFI-017); manual M03 retest
-pending. ADR 019 stays pending the user's picker-architecture approval, and ADR 020 stays deferred to Phase 7.
+**Status:** Implemented on `feature/v0.2.0` (automated `c-0001`, `c-0010`; coverage PFI-017). **Manual M03 retest
+PASS** (user, 2026-11-17, at `070e9be`, Developer Mode off): one and five folders each gave exactly one "Repair
+completed" dialog in front of Explorer, with no PowerShell, Windows Terminal or command-prompt window. The full gate
+stays BLOCKED by `c-0002`. ADR 019 stays pending the user's picker-architecture approval, and ADR 020 stays deferred to
+Phase 7.
 
 **Context:**
 - M03 (user, 2026-11-17, Developer Mode off): Repair worked for one and five folders, but a large Windows PowerShell
@@ -74,8 +77,9 @@ pending. ADR 019 stays pending the user's picker-architecture approval, and ADR 
 
 ## 021 — Phase 0A: guarded runtime start, partial Repair, per-user maintenance lock with coalescing — 2026-11-17 — Claude
 
-**Status:** Implemented on `feature/v0.2.0` (automated `c-0001`, `c-0003`, `c-0010`); manual M03 pending. ADR 019 stays
-pending and ADR 020 stays deferred to Phase 7.
+**Status:** Implemented on `feature/v0.2.0` (automated `c-0001`, `c-0003`, `c-0010`). Manual M03 **PASS** after Phase
+0A.1 (user, 2026-11-17; ADR 022): one result dialog for one and for five folders, 21 of 21 icons verified. ADR 019 stays
+pending and ADR 020 stays deferred to Phase 7. The Setup lock gate (Open Issue 26a) is still open.
 **Context:** Phase 0 (D3) found four Repair problems.
 - Runtime modules were dot-sourced before the dispatcher's `try`. The static verb runs `powershell.exe -WindowStyle
   Hidden`, so a missing module failed with no visible message.
@@ -260,6 +264,35 @@ experiment W1").
   hook, so B is weaker than first assessed. Claude recommends C as the final design (Choose Folder Icon… opens an
   out-of-process picker with the complete list), D if quick native access to 12 icons is wanted, and A as the fallback
   until then. A native menu with arrows but no wheel is acceptable only as a fallback.
+
+**Update 2026-11-17 (later): option C design analysis, documentation only** (details: plan, "Option C design
+recommendation"). Nothing was implemented, compiled, registered or run. **The decision is still pending the user's
+explicit approval.**
+- **The earlier "C needs a broker rebuild" is corrected.** The broker accepts `Apply` with any verb named
+  `PortableFolderIcons.Apply.NNNN` and any 64-hex `PfiIconHash`, and it never looks the hash up
+  (`SelectionBroker.cs`, `ValidateCommand`). So a "Choose Folder Icon…" verb can use a reserved Apply identity: key
+  `PortableFolderIcons.Apply.0000` (icon ordinals start at 0001) and a fixed hash that no accepted icon can have.
+  - The unchanged broker writes the usual request and starts the unchanged launcher.
+  - The dispatcher recognises the identity, consumes the request, opens a WPF picker in its own process, and applies
+    the choice through the existing batch Apply. Cancelling writes nothing.
+  - An older runtime fails safely: every target is reported as "not present in the active manifest" and nothing is
+    written.
+- **The broker is still the only way to get a whole selection without new code.** Command-line verbs get items through
+  `CreateProcess` command lines, and Microsoft caps them at 100 items even with `Player`. Only the COM methods
+  (ExecuteCommand, DropTarget) pass one complete item array. A launcher without the broker cannot reliably merge a
+  multi-folder selection.
+- **What the unchanged broker cannot give, and so what could still justify a rebuild:**
+  - **Exact menu order.** The cascade is ordered by key name, so an Apply-shaped key sorts before `Utility_0100_Reset`
+    and Choose comes first. The documented `Position=Bottom` and the Shell default-value order list are unmeasured
+    inside `ExtendedSubCommandsKey` cascades.
+  - **Keyboard focus.** The broker passes no foreground right to the processes it starts.
+  - A first-class `Choose` action instead of a reserved identity.
+
+  A rebuild means new x64/x86 hashes, a WatchGuard classification, the coordinated version advance, and new
+  native-harness builds.
+- **Recommendation:** C through the unchanged broker, behind a `menu_layout` setting whose default stays the Phase 0B
+  layout until a manual gate (M05) passes. Rebuild only if the menu order or the M05 focus result requires it. ADR 020
+  is unchanged: the Uninstall verb stays in the menu (fourth entry) until the Phase 7 root uninstaller passes acceptance.
 
 ## 018 — Tracked root CLAUDE.md adapter that imports AGENTS.md — 2026-11-16 — Claude
 
