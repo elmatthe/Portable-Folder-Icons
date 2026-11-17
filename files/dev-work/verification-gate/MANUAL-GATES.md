@@ -57,6 +57,45 @@ Record each of the four layers separately: persisted state (automation), fresh-p
 With three disposable folders selected, choose **Uninstall Portable Folder Icons** and count the confirmation
 dialogs. Answer **No** to every prompt. Nothing is uninstalled.
 
+## P1 and P1-W — native popup and mouse wheel (feasibility probes, not acceptance gates; ADR 019)
+
+These probes run in a PowerShell window, never in Explorer. They register nothing and run nothing that is chosen. Their
+scripts are local, ignored experiment files under `outputs/experiment-single-menu/` on the original PC (RETAIN.md
+there), so a fresh checkout does not have them.
+
+**P1 result (user, 2026-11-17; `Test-SingleMenuFeasibility.ps1 -Interactive`, 120, 45, and 120 in columns of 30).**
+- PASS: full inventory in one submenu, all 120 icons reachable with the scroll arrows, keyboard Up/Down, and selections
+  logged.
+- **FAIL: the mouse wheel does not scroll the popup.**
+- Not proven: Explorer, Home/End and access keys, other resolutions and scaling.
+
+**P1-W: BLOCKED_BY_ENDPOINT_SECURITY (2026-11-17). Question: does real wheel input reach a thread-local menu hook, and
+does wheel-to-navigation feel acceptable?**
+- **Incident.** WatchGuard Endpoint Security 360 deleted its probe script `Test-MenuWheelFeasibility.ps1` at about
+  08:29: "Malware or potentially unwanted program (PUP)", action Deleted, local quarantine record `7b16cb86-…`.
+- **Status.** The script no longer exists. Do not recreate, restore, rename or modify it, do not request exclusions,
+  and do not run alternative hook implementations. The probe resumes only if the security owner reviews and authorizes
+  an exact implementation.
+- **History only.** The steps below describe what P1-W would have checked. They are kept for that review, not for
+  running.
+
+1. Run `powershell.exe -NoLogo -NoProfile -STA -ExecutionPolicy Bypass -File files\dev-work\verification-gate\outputs\experiment-single-menu\Test-MenuWheelFeasibility.ps1 -Run Interactive -Mode Observe -Count 120`.
+   Right-click the small window, open **Folder Icons (wheel experiment)**, rest the pointer on the icon list, roll the
+   wheel down about five notches, then press Esc twice. Expected: the list does **not** scroll (the P1 FAIL), and the
+   printed line shows `wheelSeen` greater than 0. A value of 0 means real wheel input never reaches the hook. Close the
+   window.
+2. Run the same command with `-Mode Navigate`. Roll the wheel down and up over the icon list.
+   - Expected: the selection moves 3 items per notch and the list scrolls with it.
+   - At the bottom it stops on Icon 120 without jumping back to the top, and wheel up returns to Reset to Default.
+   - Moving the mouse afterwards re-highlights the item under the pointer.
+
+   Click one icon. The printed `chosen=` names it, and nothing is applied.
+3. Repeat step 2 with `-Count 45`, and with `-Count 120 -ColumnSize 30`.
+4. Report, for each step, whether the wheel scrolled, any jump or wrong selection, and whether it felt acceptable. The
+   log is `outputs/experiment-single-menu/results/wheel-interactive.log`.
+
+A PASS proves only the isolated popup. Explorer would still need option B plus a hook inside Explorer (ADR 019 update).
+
 ## Opt-in automated checks
 
 | Check | Enable with | Uses |

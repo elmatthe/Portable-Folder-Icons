@@ -1,6 +1,138 @@
 # Portable Folder Icons — Handoff
 
-## Snapshot — 2026-11-17 — Claude Code — Phase 0B checkpoint after manual M01 PASS (current)
+## Snapshot — 2026-11-17 (P1 results, wheel experiment, GitHub publication) — Claude Code (current)
+
+- **Machine and branch:** the original Windows 11 PC (build 26200.9725, Windows PowerShell 5.1), branch
+  `feature/v0.2.0`. This snapshot is written just before the user-authorized documentation checkpoint commit on top of
+  `496b508` (parent `ddbe65f`), so read the new SHA with `git log -1`.
+- **Publication:** the user authorized publishing this branch with a normal push, `git push -u origin feature/v0.2.0`.
+  The push carries `ddbe65f`, `496b508` and this checkpoint in their existing ancestry. Before it, remote
+  `feature/v0.2.0` did not exist, `origin/feature/v0.1.1` was at `88007c5` and `origin/main` at `6cb6bae`. Check the
+  result with `git ls-remote origin`. No merge, release, tag or `main` change; `feature/v0.1.1` is not pushed separately.
+- **Pre-publication audit (2026-11-17), unpublished commits `ddbe65f`, `496b508` plus this checkpoint:**
+  - **ICOs:** exactly the ten colour ICOs are tracked. No personal ICO, `files/extra-ICO-files-for-use/`, backup, gate
+    output or cache appears in any ref's history.
+  - **Secrets:** the secret-pattern scan found no hits.
+  - **Private details:** the home path and machine name are pre-existing in public `origin/main` (Open Issue 18), and the
+    unpublished commits add none.
+  - **Broker:** x64 `88a113f1…`, x86 `134832fd…` and source `4dc9ec37…` match `SelectionBroker.build.json` and are
+    unchanged since `ddbe65f`.
+  - **Working tree:** no tracked file outside `md-instructions/` and `MANUAL-GATES.md` changed.
+- **P1 (user, 2026-11-17, isolated popup, not Explorer):**
+  - **PASS:** the full inventory sits in one native submenu, the static 16-cap does not apply, all 120 icons are
+    reachable with the on-screen scroll arrows, keyboard Up/Down works, and the selections Icon 013/040/035/120 were
+    logged.
+  - **FAIL:** the mouse wheel does not scroll it.
+  - **Not proven:** Explorer, Home/End and access keys, columns at other resolutions and scaling, broker dispatch from a
+    dynamic handler, WatchGuard acceptance of a new extension.
+  - Not a complete PASS.
+- **W1 (Claude, isolated, synthetic input):**
+  - Wheel messages reach the menu's modal loop (thread-local `WH_MSGFILTER`, `MSGF_MENU`), and the default loop ignores
+    them.
+  - Consuming them and posting Up/Down key messages scrolls the menu by moving the selection, with clamping and no wrap.
+  - No documented API scrolls a popup menu. In Explorer this would need option B's in-process DLL plus a hook on
+    Explorer's UI thread.
+  - Measured on 1920×1080: 45 icons fit, 120 icons need arrows (47 of 123 rows visible), 120 icons in 4 columns of 30
+    fit.
+- **Security incident: W1 is BLOCKED_BY_ENDPOINT_SECURITY (Open Issue 25).**
+  - **Detection:** WatchGuard Endpoint Security 360 deleted `Test-MenuWheelFeasibility.ps1` as "Malware or potentially
+    unwanted program (PUP)" at about 08:29 (local quarantine record `7b16cb86-…`, 08:29:36). The console incident ID is
+    not available locally.
+  - **Handling:** nothing was recreated or worked around. No experiment process or hook remains, and Explorer, the
+    registry and production were untouched.
+  - **Cause:** design and trigger analysis (evidence vs speculation) are in the plan section "P1 user results and
+    mouse-wheel experiment W1".
+- **Recommendation (user decision; nothing implemented):**
+  - C: Folder Icons ▸ Reset to Default, Repair Portable Folder Icons, Choose Folder Icon…, which opens an out-of-process
+    picker with the complete list (wheel, keyboard, type-to-find).
+  - D if quick native access to 12 icons matters.
+  - A (Phase 0B) stays the fallback.
+  - Not B with a wheel hook: it needs code and a hook inside Explorer, and W1 shows the technique draws an endpoint
+    detection.
+  - A native menu with arrows but no wheel is a fallback only.
+- **Final menu (reconciled; ADR 019/020):** Reset to Default, Repair Portable Folder Icons, Choose Folder Icon. No
+  Uninstall in the menu. Complete removal only through a root `Uninstall-Portable-Folder-Icons.bat`, deferred until
+  ownership tracking and safe restoration are reliable (Phase 7).
+- **Last verification:** focused gate `20261117T143621Z-f303a2` (2026-11-17, Windows PowerShell 5.1) on HEAD `496b508`
+  plus this checkpoint's staged documentation, result PASS.
+  - **`c-0005`:** exactly the ten tracked colour ICOs, and no personal ICO staged.
+  - **`c-0006`:** project verifier exit 0 with 561 passed, 0 failed and 1 harness launch withheld (owned by `c-0002`).
+  - **Also:** `git diff --check` was clean.
+  - **Not re-run:** the full gate. The last full gate is `20261117T132259Z-427c89`, BLOCKED only by the withheld
+    `c-0002`, and only documentation has changed since.
+  - The only later edit before the commit is this line. The run folder was removed after this record.
+- **Decisions for the user and security owner:**
+  1. The menu architecture: C, D, B (in-process plus security review) or keep A.
+  2. Close the W1 incident in the WatchGuard console, and say whether any hook experiment may ever be authorized
+     (exact implementation).
+  3. Classify the harness builds x64 `0a71577b…` and x86 `4f589ac4…` (unchanged blocker).
+  4. Confirm `outputs/retained-phase0-preedit/`.
+  5. Manual gates M02–M04.
+- **Exact next action:** stop for user review. Phase 0A (Repair) remains the next functional phase and is not started.
+  No Explorer extension, production menu change or uninstaller work.
+- **Retained evidence, each with a RETAIN.md:**
+  - `outputs/experiment-single-menu/`: the P1 script, the W1 log and two captures, kept for the incident and decision.
+  - `outputs/manual/`: M02–M04.
+  - `outputs/retained-phase0-preedit/`.
+  - `files/backups/*`.
+  - `cache/native-harness/`.
+
+## Snapshot — 2026-11-17 (later) — Claude Code — single-menu feasibility and uninstaller requirement (superseded by the snapshot above)
+
+- **Branch/HEAD:** `feature/v0.2.0` at `496b50808498ade7086ce6479e2a623609ba1629`
+  (`feat: restore accessible folder icon menus (Phase 0B)`, parent `ddbe65f`). This is the one commit the user
+  authorized, made after the full gate below. Local only: no push, merge, tag, release or `main` change.
+- **Uncommitted, needs the user's review before any commit:** ADR 019 and ADR 020 in `md-instructions/Decisions.md`,
+  the plan (final-UX invariant, branch row, the section "Final menu UX requirement and single-menu feasibility", the
+  Phase 7 "Dedicated complete uninstaller" amendment, a Phase 8 note) and this Handoff. Personal ICOs remain untracked
+  and untouched.
+- **Final UX requirement (user, 2026-11-17; ADR 019/020):**
+  - One top-level **Folder Icons** entry with Reset to Default, Repair and Choose Folder Icon, holding one complete
+    icon list that the mouse wheel and the keyboard can scroll. A native submenu is strongly preferred.
+  - No Uninstall in the menu. Complete removal only through a root `Uninstall-Portable-Folder-Icons.bat` (Phase 7,
+    reconciled).
+  - Phase 0B's two-entry layout is the working fallback, not the final design.
+- **Feasibility result (plan section, ADR 019):**
+  - Static registration cannot give one complete list: the 16-entry cap was re-measured.
+  - Experiment E1 (isolated `SHCreateDefaultContextMenu` with an in-process callback, not Explorer) kept all items of
+    one dynamically inserted submenu from 0 to 300 icons, with column breaks intact. The cap is specific to static
+    cascades.
+  - A single native submenu therefore needs a new **in-process Explorer extension**: IContextMenu or IExplorerCommand,
+    both documented as in-process only. That conflicts with ADR 002, ADR 005 and the plan invariants. Microsoft does
+    not support managed in-process extensions, no native toolchain is installed here, and a new DLL inside Explorer
+    needs WatchGuard classification or signing.
+  - Wheel scrolling of tall native popup menus is unverified, and developer forums report that it does not work.
+  - The broker is plausibly reusable unchanged.
+  - Nothing was registered, installed or invoked.
+  - Deviation: E1's first run (no registry keys) made DefCM load the machine's installed context-menu handlers into the
+    test PowerShell process, read-only `QueryContextMenu` only. The run was corrected and `c-0009` is unaffected.
+- **Uninstaller (ADR 020, plan Phase 7 amendment):** requirement recorded, not implemented. No PC-wide scan, no real
+  folder touched, production installation untouched.
+- **Decisions requested from the user:**
+  1. Optionally run probe P1 (command in `outputs/experiment-single-menu/RETAIN.md`) and report the wheel, scroll-arrow
+     and keyboard results.
+  2. Approve or decline a bounded menu-architecture proof that needs an in-process exception. If approved, also choose
+     native C++ (toolchain install) or managed C# (unsupported), arrange WatchGuard classification or signing, and
+     accept a test DLL that Explorer may keep loaded until sign-out.
+  3. Otherwise choose C (picker) or D (hybrid), each needing a broker rebuild, or keep A.
+  4. Authorize, or not, a commit of this session's documentation.
+- **Last verification:** unchanged since the commit. Full gate `20261117T132259Z-427c89` on the pre-commit tree (see
+  the previous snapshot): BLOCKED only by the withheld `c-0002`, no FAIL. After the commit, only documentation and
+  ignored experiment files changed. The focused documentation check result is in the work log entry for 2026-11-17
+  (later).
+- **Exact next action:** stop for user review. Do not implement the menu architecture, the uninstaller or Phase 0A
+  until the user decides. Phase 0A (Repair) remains the next functional phase.
+- **Retained evidence:**
+  - `outputs/experiment-single-menu/` (probe P1 pending; RETAIN.md)
+  - `outputs/manual/` (M02–M04 pending)
+  - `outputs/retained-phase0-preedit/` (awaiting the user's confirmation)
+  - `files/backups/*`
+  - `cache/native-harness/`
+
+  Gate runs `20261116T192101Z-bc73ec` and `20261117T132259Z-427c89` were removed after being recorded. No test registry
+  keys are left.
+
+## Snapshot — 2026-11-17 — Claude Code — Phase 0B checkpoint after manual M01 PASS (superseded by the snapshot above)
 
 - **Branch/HEAD:** `feature/v0.2.0` (created 2026-11-16 from `ddbe65f`, the Phase 0 checkpoint; local `feature/v0.1.1`
   is also `ddbe65f`, one ahead of `origin` at `88007c5`). This snapshot is written just before the one user-authorized
@@ -523,6 +655,9 @@ cache; it is forbidden here and was not implemented.
 | 20 | Minor (tooling) | `.claude/CLAUDE.md` (gitignored workspace template) | Its `@AGENTS.md` and `@AI-WORKSPACE.md` imports resolve relative to `.claude/` (Claude Code docs), where neither file exists; only its fallback sentence points to the root files. A local pointer to the housekeeping rule was added. | Fixed 2026-11-16 (ADR 018): tracked root `CLAUDE.md` imports `@AGENTS.md`; verifier check. Local file untouched. Confirmed 2026-11-17: a fresh session loaded `CLAUDE.md` and `AGENTS.md` at startup | Claude |
 | 21 | Minor (docs) | `md-instructions/Feature-Map.md` | `AGENTS.md` and `CLAUDE.md` notes require registering features in `md-instructions/Feature-Map.md`, which has never existed in this repository; the gate's `coverage.tsv` is the enforced register (Phase 0B registered `PFI-002`/`PFI-014` there before coding). | Open: create the map from the workspace structure in a docs task | Claude |
 | 22 | Minor (docs) | `README.md`, `files/readme-assets/folder-icons-submenu.png` | The README screenshot shows the pre-Phase-0B submenu order, and the README does not yet mention overflow entries for more than 12 personal icons (the ten shipped colours all fit the chooser, so the usage text stays true). | Open: Phase 9 docs, with a new user-made screenshot | Claude |
+| 23 | Major (UX) | Explorer menu | User requirement 2026-11-17: one top-level Folder Icons entry with one complete, wheel- and keyboard-scrollable icon list (native submenu preferred). Static registration cannot do it (16-entry cap); a native single submenu needs an in-process Explorer extension (ADR 019). P1 (user): the native popup does not scroll with the wheel; arrows and keyboard work. W1: the wheel works only through a menu hook, which in Explorer means in-process code plus a hook. | Open: user decision. Claude recommends C (picker launched from Choose Folder Icon…), or D; A (Phase 0B) stays the fallback | User / Claude |
+| 25 | Security incident | `outputs/experiment-single-menu/Test-MenuWheelFeasibility.ps1` (ignored experiment) | 2026-11-17 about 08:29: WatchGuard Endpoint Security 360 deleted the W1 wheel-experiment script, detection "Malware or potentially unwanted program (PUP)", action Deleted (local quarantine record `7b16cb86-a9e5-4b25-ad38-861fa7b478c2`, 08:29:36). The script used `Add-Type`, a thread-local `WH_MSGFILTER` hook, posted key and wheel messages, and a screen capture of its own menu. The trigger is unconfirmed. No process or hook remains, and Explorer and production were untouched. | BLOCKED_BY_ENDPOINT_SECURITY. Do not recreate or continue. Open: security owner reviews the console incident; any future hook experiment needs their authorization of an exact implementation | User / Claude |
+| 24 | Major (feature) | Complete removal | User requirement 2026-11-17: root `Uninstall-Portable-Folder-Icons.bat` as the only complete-uninstall entry point; Uninstall leaves the Explorer menu (ADR 020). | Open: plan Phase 7 (reconciled); register in the Feature Map (Open Issue 21) before coding | User |
 | 13 | Major | Reset (D2) | Not reproduced at persisted-state or fresh-process Shell layers; rendering unverified. | Open: manual M02, then plan Phase 2 | User |
 | 14 | Major | Actions INI read | ANSI `desktop.ini` non-ASCII text corrupted by Apply/Reset (read as UTF-8, rewritten UTF-16LE). | Open: plan Phase 2 | Claude |
 | 15 | Minor | Reset attributes | Reset does not restore pre-existing folder ReadOnly; removes third-party icon fields. | Open: plan Phase 6 | Claude |
@@ -530,6 +665,36 @@ cache; it is forbidden here and was not implemented.
 ---
 
 ## Work Log (newest first)
+
+- 2026-11-17 (P1, W1, publication) — Recorded the user's P1 results.
+  - **Research:** read the Microsoft Learn pages on `WM_MOUSEWHEEL`, hooks, `MessageProc`, `SetWindowsHookEx`,
+    `TrackPopupMenuEx`, `MENUINFO`, About Menus, `GetMenuItemRect`, `MN_GETHMENU`, `EndMenu` and window classes.
+  - **W1:** ran the isolated wheel experiment (results and the security incident: plan section "P1 user results and
+    mouse-wheel experiment W1", ADR 019 update, Open Issue 25). Stopped all W1 execution when WatchGuard deleted the
+    script. Read-only checks showed no lingering process and found the local quarantine record.
+  - **Documentation:** reconciled the final menu (option D now reads Reset, Repair, Choose Folder Icon with 12 icons and
+    "More icons…"). Recorded P1/P1-W in `MANUAL-GATES.md`.
+  - **Pre-publication audit:** see the snapshot.
+  - **Housekeeping:** removed the E1 outputs, the empty fixture folder and 24 redundant captures, and kept the P1 script,
+    the W1 log and two captures (RETAIN.md updated).
+  - **Scope kept:** no architecture, Phase 0A, uninstaller, Explorer or registry work. — Claude
+
+- 2026-11-17 (later) — Committed Phase 0B as `496b508` after the full gate (user-authorized; local only). Did the
+  bounded single-menu feasibility investigation:
+  - read the Microsoft Learn documentation on static and dynamic menus, in-process guidance, MENUINFO, MENUITEMINFO
+    and About Menus;
+  - ran isolated experiment E1 (all items of a dynamic submenu were kept, 0–300; first run deviated, see the snapshot);
+  - did read-only checks: no native toolchain, `EnforceShellExtensionSecurity` not set, the broker `ValidateCommand`
+    contract.
+
+  Recorded ADR 019 (single-entry UX, decision pending) and ADR 020 (root complete uninstaller), plus the plan sections
+  and the Phase 7 reconciliation. Housekeeping: removed two recorded gate runs (3.9 MB) and retained the experiment
+  folder for probe P1. No architecture, uninstaller or Phase 0A work. `ctx7` CLI rejected its API key, so
+  documentation came from the Context7 MCP server and Microsoft Learn directly.
+
+  Documentation check after the edits: focused gate `20261117T134310Z-bf084e` (`c-0006` project verifier) PASS in 99 s
+  on HEAD `496b508` plus these uncommitted docs. `git diff --check` was clean. The run folder was removed after this
+  record. — Claude
 
 - 2026-11-17 — Recorded the user's M01 PASS (Phase 0B), verified the live installation is byte-identical to the
   working tree, added the Changelog entry, ran the full gate and made the authorized local Phase 0B commit. The user
@@ -886,6 +1051,17 @@ cache; it is forbidden here and was not implemented.
 ---
 
 ## Session Sync Log (newest first)
+
+### 2026-11-17 — Current Windows workspace — Phase 0B commit and single-menu feasibility (Claude Code)
+
+- One local commit on `feature/v0.2.0`: `496b508` (user-authorized). Not pushed; no branch, tag or merge.
+- Committed: `CLAUDE.md`, `scripts/Windows/PortableFolderIcons.Integration.ps1`, `scripts/verify.ps1`,
+  `files/tests/Invoke-Tests.ps1`, gate `checks.tsv`, `coverage.tsv`, `GATE.md`, `MANUAL-GATES.md`,
+  `tests/Invoke-Phase0Diagnostics.ps1`, `tests/Test-PfiStaticCascadeMenu.ps1`, and Briefing, Changelog, Decisions,
+  Handoff and the plan.
+- Uncommitted afterwards: Decisions (ADR 019/020), the plan and Handoff. Ignored:
+  `outputs/experiment-single-menu/`.
+- Preserved: personal ICOs untracked and unstaged; installation and production registry untouched (read only).
 
 ### 2026-11-16 — Current Windows workspace — authorized Phase 0 checkpoint (Claude Code)
 

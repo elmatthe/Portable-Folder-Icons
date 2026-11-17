@@ -5,6 +5,131 @@ entries appear first.
 
 ---
 
+## 020 — Complete removal only through a root Uninstall launcher; Uninstall leaves the Explorer menu — 2026-11-17 — Claude
+
+**Status:** Accepted requirement (user, 2026-11-17). Design and implementation pending (reconciled Phase 7); nothing
+implemented. Until the replacement passes acceptance, the current Explorer Uninstall verb and the legacy warned purge
+stay as they are.
+**Context:** The final application should have one setup/repair launcher (`Setup_and_Run-Portable-Folder-Icons.bat`)
+and one complete-uninstall launcher. Reset and Repair stay in Explorer. The plan's Phase 7 offered "remove completely"
+from both setup and the installed Uninstall, and Phase 0 found that the installed purge deletes `icons\` with only a
+warning (D4).
+**Decision:** Complete removal lives only in a root `Uninstall-Portable-Folder-Icons.bat`. It runs on double-click,
+like setup, with Windows PowerShell 5.1, no Python, no manual PowerShell and no parameters. The Explorer menu drops
+Uninstall (final menu: Reset to Default, Repair, Choose Folder Icon; ADR 019). The flow is DISCOVER → VERIFY OWNERSHIP
+→ PREVIEW → CONFIRM (Y/N) → RESTORE → VERIFY → CLEAN UP → REPORT:
+- **Discover** from tracking records, previous manifests, verified legacy signatures (never invented), cache
+  references and per-folder resources across accessible local fixed drives, so the current manifest is not the only
+  source. Network shares, junctions and symbolic links are not followed, there is no automatic elevation, and
+  inaccessible system areas need an approved scope.
+- **Preview** shows real counts, and nothing changes before a Y answer. Cancelling is always possible.
+- **Restore** preserves unrelated `desktop.ini` settings, other applications' and user icons, ambiguous references,
+  original attributes, system customizations and the file's encoding. A folder that cannot be restored safely is
+  skipped and recorded. The uninstaller never deletes a whole `desktop.ini`, never resets the icon cache and never
+  restarts Explorer.
+- **After confirmation** a change journal is kept, each restore is verified, per-folder failures are reported, and
+  resources still referenced are kept. Registrations, runtime and cache are removed only when proven safe, partial
+  completion is reported accurately, and the uninstaller's own source repository is never deleted.
+
+There is one implementation; useful internals (registry ownership, Reset's INI rules) are reused. Legacy paths are
+retired only after the replacement passes.
+**Alternatives considered:** Keeping complete removal in the menu (an Explorer verb is a poor host for a long,
+confirmed, journalled operation, and it multiplies under multi-selection, D4/M04). Keeping two entry points, setup and
+installed Uninstall (competing implementations).
+**Consequences:** Phase 7 depends on Phase 6 tracking for safe restores; legacy coverage stays incomplete without it.
+Acceptance needs isolated fixtures plus an explicitly authorized manual uninstall gate, never real user folders. Open
+design points for Phase 7:
+- Read literally, "never delete a whole `desktop.ini`" also keeps a file this tool created that is empty after
+  restore.
+- How the launcher finds the installed runtime when it runs from a checkout.
+- Scan duration on large drives (the preview states the scope).
+
+## 019 — Final menu: one Folder Icons entry; Phase 0B static layout stays the fallback; native single submenu needs an in-process extension — 2026-11-17 — Claude
+
+**Status:** Requirement accepted (user, 2026-11-17). Architecture decision **pending user review**. Phase 0B (ADR 015)
+remains the committed working fallback (M01 PASS), not the final design.
+**Context:** The user wants one top-level **Folder Icons** entry with Reset to Default, Repair Portable Folder Icons
+and Choose Folder Icon. It should hold one complete icon list with mouse-wheel and keyboard navigation and scrolling,
+and the user strongly prefers a native Windows submenu to a separate window. Uninstall leaves the menu (ADR 020).
+**Findings, 2026-11-17** (details, sources and comparison: plan, "Final menu UX requirement and single-menu
+feasibility"):
+- **Documented.**
+  - Static verbs (SubCommands, which needs HKLM; ExtendedSubCommandsKey, which works from HKCU) are the only
+    no-code cascade. Every dynamic menu route runs inside the caller, usually Explorer: an IContextMenu handler is an
+    in-process COM DLL, and IExplorerCommand "supports in-process activation only", with one subcommand level.
+    Out-of-process activation exists only for invocation (DelegateExecute/IExecuteCommand, DropTarget), not for building
+    a menu.
+  - Microsoft "recommends against writing managed in-process extensions to Windows Explorer and does not consider them
+    a supported scenario."
+  - The Windows 11 first-level menu needs a packaged or sparse-package native IExplorerCommand DLL.
+  - Win32 menus can scroll: MENUINFO.cyMax says scroll bars are used "when the menu items exceed the space available",
+    although "About Menus" says such a menu "will be truncated". They can split into columns with
+    `MFT_MENUBREAK`/`MFT_MENUBARBREAK`, and have a standard keyboard interface (Up/Down item, Left/Right column, access
+    key, Enter, Esc).
+  - No Microsoft statement on mouse-wheel scrolling of popup menus was found.
+- **Measured, isolated, not Explorer** (experiment E1 on Windows 11 build 26200.9725). The same DefCM builder that caps
+  static cascades at 16 (`c-0009`) kept every item of one dynamically inserted submenu: Reset, Repair, a separator and N
+  icons for N = 0 to 300, in order, with column breaks intact.
+- **Hypotheses, unverified.**
+  - Explorer adds no cap to a handler's submenu.
+  - IExplorerCommand subcommands may share the static 16-cap.
+  - The wheel may not scroll tall context menus (developer forum reports), while scroll arrows and the keyboard do.
+    **(Confirmed for an isolated popup by P1 and W1, 2026-11-17; see the update below.)**
+  - The broker could be reused unchanged: a handler calls `IInitializeCommand::Initialize` with an Apply/Reset name and
+    a property bag holding `PfiAction`/`PfiIconHash`, then `SetSelection` and `Execute`, which are the only contract
+    `ValidateCommand` checks.
+
+**Decision (pending):** A single complete native submenu is not achievable with static registration. It requires a new
+in-process Explorer extension, which conflicts with ADR 002, ADR 005 and the plan's invariants ("no … C/assembly, or
+new runtime language"; compiled extension rejected). It can proceed only with the user's explicit approval of:
+- an in-process exception: native C++, which needs a toolchain this machine lacks, or managed C# built with the inbox
+  compiler, which Microsoft does not support in-process;
+- a new DLL loaded into Explorer and every process that shows a shell context menu, classified by WatchGuard or
+  signed;
+- Setup, Repair and the uninstaller handling a DLL that Explorer keeps locked;
+- a manual Explorer acceptance gate.
+
+The recommended first step needs no approval: the user-run probe P1 (wheel, keyboard and scroll on a native user32
+popup with 45 and 120 items).
+**Alternatives considered:**
+- (A) Phase 0B two-entry static layout: works today, no new risk, but not one entry.
+- (C) One entry opening a compact picker window: scrolls and searches natively, out of process, no Explorer code. It
+  needs a new broker action (the broker accepts only Apply/Reset), so a rebuild and a WatchGuard decision, and it is
+  not the native submenu the user prefers.
+- (D) Hybrid: one static entry with Reset, Repair and 13 icons plus "More icons…" opening the picker.
+- Send To subfolder: not top-level, pollutes the user's Send To folder.
+- Packaged Windows 11 menu: native DLL plus package identity and signing; Windows 10 differs.
+
+**Consequences:** No architecture change until the user decides. Phase 0A stays the next functional phase.
+
+**Update 2026-11-17: P1 user results and wheel experiment W1** (details: plan, "P1 user results and mouse-wheel
+experiment W1").
+- **P1, user-run on an isolated Shell-built popup, not Explorer.**
+  - PASS: one submenu held the full inventory, all 120 icons were reachable with the scroll arrows, and keyboard
+    Up/Down worked (selections Icon 013, 040, 035 and 120 logged).
+  - **FAIL: the mouse wheel does not scroll it.**
+  - Not proven: Explorer integration, Home/End and access keys, columns at other resolutions and scaling, broker
+    dispatch from a dynamic handler, WatchGuard acceptance.
+  - Not a complete PASS.
+- **W1, isolated, synthetic input, thread-local `WH_MSGFILTER` in the test process.**
+  - Wheel messages reach the menu's modal loop (`MSGF_MENU`) but the default loop ignores them.
+  - Consuming them and posting Up/Down key messages scrolls the menu by moving the selection, clamped and without
+    wrapping.
+  - No documented API scrolls a popup menu, so this relies on posted keyboard messages, an undocumented way to drive a
+    menu.
+  - In Explorer it would need a hook on Explorer's UI thread installed by in-process code, which is option B plus a
+    hook.
+  - **BLOCKED_BY_ENDPOINT_SECURITY.** WatchGuard Endpoint Security 360 deleted the W1 script as "Malware or
+    potentially unwanted program (PUP)" at about 08:29 (local quarantine record `7b16cb86-…`). It used a thread hook,
+    posted keyboard messages, `Add-Type` and screen capture. The trigger is unconfirmed.
+  - It is not recreated or continued without the security owner's review of an exact implementation. Real wheel
+    hardware through a hook (gate P1-W) stays unverified.
+  - A production wheel hook would risk the same classification on users' machines.
+- **Effect on the decision (still pending the user).** A native submenu meets the wheel requirement only through that
+  hook, so B is weaker than first assessed. Claude recommends C as the final design (Choose Folder Icon… opens an
+  out-of-process picker with the complete list), D if quick native access to 12 icons is wanted, and A as the fallback
+  until then. A native menu with arrows but no wheel is acceptable only as a fallback.
+
 ## 018 — Tracked root CLAUDE.md adapter that imports AGENTS.md — 2026-11-16 — Claude
 
 **Status:** Accepted (user requirement: Claude Code instruction portability)
